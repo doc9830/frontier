@@ -32,7 +32,13 @@ export interface Universe {
   homeSystemId: string;
 }
 
-export const FIELD = { width: 1240, height: 780 };
+/**
+ * Галактика на 128 систем. Поле растёт вместе с числом систем, поэтому
+ * плотность (и, значит, расстояния между соседями, топливо и время прыжка)
+ * остаётся той же, что и в маленькой галактике: 1240 × 780 на ~25 систем.
+ */
+export const SYSTEM_COUNT = 128;
+export const FIELD = { width: 2820, height: 1760 };
 const MIN_DIST = 120;
 const START_DAY = 127;
 
@@ -369,7 +375,7 @@ function emptyMarket(): StarSystem['market'] {
 /** Generates the whole galaxy. Same seed -> identical universe. */
 export function generateUniverse(seed: string): Universe {
   const rng = createRng(seed);
-  const count = rng.int(22, 29);
+  const count = SYSTEM_COUNT;
   const positions = placePositions(rng, count);
   const usedNames = new Set<string>();
   const systems: StarSystem[] = [];

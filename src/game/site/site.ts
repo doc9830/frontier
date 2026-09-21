@@ -84,21 +84,16 @@ export function systemSiteCandidate(state: GameState, system: StarSystem): SiteC
   };
 }
 
-/** Известные системы, пригодные под закладку, — сначала лучшие и ближние. */
-export function siteCandidates(state: GameState): SiteCandidate[] {
-  const candidates = state.systemIds
-    .map((id) => state.systems[id])
-    .filter((system): system is StarSystem => !!system && system.discovered)
-    .map((system) => systemSiteCandidate(state, system));
-  return candidates.sort((a, b) => {
-    if (a.ok !== b.ok) return a.ok ? -1 : 1;
-    const hopsA = a.hops < 0 ? 999 : a.hops;
-    const hopsB = b.hops < 0 ? 999 : b.hops;
-    if (hopsA !== hopsB) return hopsA - hopsB;
-    const bestA = Math.max(0, ...a.buildable.map((p) => p.score));
-    const bestB = Math.max(0, ...b.buildable.map((p) => p.score));
-    return bestB - bestA;
-  });
+/**
+ * Участок под свою станцию ищут только там, где стоит корабль: закладку ставят с
+ * борта, удалённых заявок фронтир не знает. Возвращает описание текущей системы
+ * со всеми причинами отказа — для панели «Закладка станции».
+ */
+export function localSiteCandidate(state: GameState): SiteCandidate | null {
+  const ship = state.ships.find((s) => s.id === state.player.shipId) ?? state.ships[0];
+  const system = ship ? state.systems[ship.systemId] : null;
+  if (!system) return null;
+  return systemSiteCandidate(state, system);
 }
 
 export function stationPhase(state: GameState): StationPhase {

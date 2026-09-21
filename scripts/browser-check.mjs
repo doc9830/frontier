@@ -174,6 +174,19 @@ const clickTab = (label) =>
     })()
   `);
 
+/** Тап по кнопке раздела в нижнем доке — так же, как пальцем на телефоне. */
+const clickDock = (label) =>
+  evaluate(`
+    (() => {
+      const button = [...document.querySelectorAll('.dock button')].find(
+        (b) => b.textContent.trim() === ${JSON.stringify(label)},
+      );
+      if (!button) return 'missing';
+      button.click();
+      return 'clicked';
+    })()
+  `);
+
 await send('Page.navigate', { url });
 await sleep(3000);
 
@@ -439,7 +452,50 @@ await send('Emulation.setDeviceMetricsOverride', {
   mobile: true,
 });
 await sleep(500);
-await clickTab('СИСТЕМА');
+// Лист закрыт: док — единственное, что висит внизу, и кнопки обязаны нажиматься.
+await evaluate("document.querySelector('.sheet-close')?.click()");
+await sleep(400);
+const closedDock = await evaluate(`
+  (() => {
+    const dock = document.querySelector('.dock');
+    const sheet = document.querySelector('.panelcol');
+    const buttons = [...dock.querySelectorAll('button')];
+    const rect = (el) => {
+      const r = el.getBoundingClientRect();
+      return { top: Math.round(r.top), bottom: Math.round(r.bottom), h: Math.round(r.height) };
+    };
+    return {
+      open: !!sheet?.classList.contains('open'),
+      hits: buttons.map((b) => {
+        const r = b.getBoundingClientRect();
+        const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+        return b === hit || b.contains(hit) ? 'dock-btn' : String(hit?.tagName ?? '?');
+      }),
+      labels: buttons.map((b) => b.textContent.trim()),
+      spare: dock.querySelectorAll('button span').length,
+      sheet: rect(sheet),
+      vh: window.innerHeight,
+    };
+  })()
+`);
+check('the sheet closes on the phone', closedDock.open === false, JSON.stringify(closedDock.sheet));
+check(
+  'closed sheet leaves the dock buttons tappable',
+  closedDock.hits.length === 6 && closedDock.hits.every((hit) => String(hit).includes('dock-btn')),
+  closedDock.hits.join(' | '),
+);
+check(
+  'closed sheet is off screen entirely',
+  closedDock.sheet.top >= closedDock.vh - 1,
+  `top ${closedDock.sheet.top} of ${closedDock.vh}`,
+);
+check(
+  'dock keeps only the six tab labels',
+  closedDock.labels.length === 6 && closedDock.spare === 0,
+  `${closedDock.labels.join(' ')} · ${closedDock.hits.length} buttons`,
+);
+
+const openDock = await clickDock('СИСТЕМА');
 await sleep(400);
 const layout = await evaluate(`
   (() => {
@@ -447,27 +503,49 @@ const layout = await evaluate(`
     const dock = document.querySelector('.dock');
     const sheetRect = sheet?.getBoundingClientRect();
     const dockRect = dock?.getBoundingClientRect();
+    const buttons = [...dock.querySelectorAll('button')];
     return {
       open: !!sheet?.classList.contains('open'),
       sheetBottom: Math.round(sheetRect?.bottom ?? -1),
       dockTop: Math.round(dockRect?.top ?? -1),
       dockHeight: Math.round(dockRect?.height ?? -1),
+      hits: buttons.map((b) => {
+        const r = b.getBoundingClientRect();
+        const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+        return b === hit || b.contains(hit) ? 'dock-btn' : String(hit?.tagName ?? '?');
+      }),
     };
   })()
 `);
+check('dock tap opens the section', openDock === 'clicked', openDock);
 check('sheet is open on the phone', layout.open === true, JSON.stringify(layout));
 check(
   'sheet stops above the dock',
   layout.dockTop > 0 && layout.sheetBottom <= layout.dockTop + 1,
   JSON.stringify(layout),
 );
-const phoneTile = await clickButton('СТАНЦИИ');
-check('subscreen opens with the dock still on screen', phoneTile === 'clicked', phoneTile);
-await sleep(400);
+check(
+  'dock buttons stay tappable under the open sheet',
+  layout.hits.every((hit) => String(hit).includes('dock-btn')),
+  layout.hits.join(' | '),
+);
 const hiddenTabs = await evaluate(
   "(() => { const t = document.querySelector('.panelcol .tabs'); return !!t && getComputedStyle(t).display === 'none'; })()",
 );
-check('tab strip hides in a subscreen (dock replaces it)', hiddenTabs === true);
+check('phone switches sections by the dock, not by an in-sheet strip', hiddenTabs === true);
+
+// Повторный тап по активному разделу закрывает лист — кнопки снова свободны.
+await clickDock('СИСТЕМА');
+await sleep(400);
+check(
+  'tapping the active tab closes the sheet again',
+  (await evaluate("document.querySelector('.panelcol')?.classList.contains('open')")) === false,
+);
+await clickDock('СИСТЕМА');
+await sleep(400);
+const phoneTile = await clickButton('СТАНЦИИ');
+check('subscreen opens with the dock still on screen', phoneTile === 'clicked', phoneTile);
+await sleep(400);
 const backVisible = await evaluate(`
   (() => {
     const button = document.querySelector('.sheet-back');

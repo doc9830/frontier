@@ -16,6 +16,8 @@
   /* Низ верхней панели в пикселях: его пересчитывает шапка, чтобы нижний лист
      никогда не заезжал под HUD. Значение ниже — для случая «шапки ещё нет». */
   --hud-bottom: 54px;
+  /* Высоту дока пишет оболочка (App.tsx) по факту замеров: здесь только запас. */
+  --dock-h: 0px;
 }
 
 * {
@@ -1000,7 +1002,8 @@ input {
 
 @media (max-width: 900px) {
   :root {
-    --dock-h: 55px;
+    /* Запасное значение на случай, пока оболочка не замерила док. */
+    --dock-h: calc(50px + env(safe-area-inset-bottom));
     --flash-h: 24px;
   }
 
@@ -1134,7 +1137,7 @@ input {
     letter-spacing: 0.04em;
   }
 
-  /* --- bottom dock ------------------------------------------------------- */
+  /* --- bottom dock: только кнопки разделов, без подписей ----------------- */
 
   .dock {
     position: fixed;
@@ -1144,7 +1147,7 @@ input {
     z-index: 42;
     display: flex;
     gap: 2px;
-    padding: 4px calc(4px + env(safe-area-inset-left)) calc(4px + env(safe-area-inset-bottom))
+    padding: 3px calc(4px + env(safe-area-inset-left)) calc(3px + env(safe-area-inset-bottom))
       calc(4px + env(safe-area-inset-right));
     border-top: 1px solid var(--line);
     background: rgba(4, 11, 16, 0.94);
@@ -1156,10 +1159,8 @@ input {
     min-width: 0;
     min-height: 46px;
     display: flex;
-    flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 2px;
     padding: 3px 2px;
     border: 1px solid var(--line-soft);
     background: linear-gradient(180deg, #0c1e28, #08131b);
@@ -1170,18 +1171,13 @@ input {
   }
 
   .dock-btn b {
-    font-size: 10px;
-    letter-spacing: 0.06em;
-    color: inherit;
-  }
-
-  .dock-btn span {
     max-width: 100%;
     overflow: hidden;
     white-space: nowrap;
     text-overflow: ellipsis;
-    font-size: 9px;
-    color: var(--dim);
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    color: inherit;
   }
 
   .dock-btn.active {
@@ -1197,7 +1193,7 @@ input {
     position: fixed;
     left: calc(8px + env(safe-area-inset-left));
     right: calc(8px + env(safe-area-inset-right));
-    bottom: calc(var(--dock-h) + env(safe-area-inset-bottom) + 6px);
+    bottom: calc(var(--dock-h) + 6px);
     z-index: 42;
     height: var(--flash-h);
     align-items: center;
@@ -1256,13 +1252,21 @@ input {
     border-top: 1px solid var(--accent);
     background: linear-gradient(180deg, #081720, #04090d);
     box-shadow: 0 -18px 40px rgba(0, 0, 0, 0.6);
-    transform: translateY(calc(100% + 12px));
-    transition: transform 0.22s ease-out;
+    /*
+     * Закрытый лист уезжает под экран целиком: сдвиг на «свою высоту + 12px»
+     * оставлял его нижнюю часть (шапку с ✕) поверх кнопок дока — они не
+     * нажимались, а выглядели срезанными. visibility убирает лист из нажатий.
+     */
+    transform: translateY(calc(100% + var(--dock-h) + 24px));
+    visibility: hidden;
+    transition: transform 0.22s ease-out, visibility 0s linear 0.24s;
     will-change: transform;
   }
 
   .panelcol.open {
     transform: none;
+    visibility: visible;
+    transition: transform 0.22s ease-out;
   }
 
   .sheet-head {
@@ -1331,8 +1335,9 @@ input {
     color: var(--dim);
   }
 
-  /* В подэкране ряд вкладок не нужен: переход между разделами — через док. */
-  .panelcol.subscreen .tabs {
+  /* На телефоне разделы переключаются только кнопками дока внизу: ряд вкладок
+     внутри листа дублировал бы их и отнимал высоту. */
+  .panelcol .tabs {
     display: none;
   }
 
@@ -1385,7 +1390,7 @@ input {
     position: absolute;
     left: 8px;
     right: 8px;
-    bottom: calc(var(--dock-h) + var(--flash-h) + env(safe-area-inset-bottom) + 10px);
+    bottom: calc(var(--dock-h) + var(--flash-h) + 10px);
     min-width: 0;
     max-height: 40vh;
     overflow-y: auto;
@@ -1422,7 +1427,7 @@ input {
     left: 8px;
     right: 8px;
     max-width: none;
-    bottom: calc(var(--dock-h) + var(--flash-h) + env(safe-area-inset-bottom) + 16px);
+    bottom: calc(var(--dock-h) + var(--flash-h) + 16px);
   }
 
   .modal-backdrop {
@@ -1556,12 +1561,8 @@ input {
   }
 
   .dock-btn b {
-    font-size: 9px;
+    font-size: 10px;
     letter-spacing: 0.02em;
-  }
-
-  .dock-btn span {
-    font-size: 8px;
   }
 
   /* 16px inputs stop iOS from zooming the whole layout on focus */
@@ -1810,20 +1811,18 @@ input {
 
 @media (max-width: 900px) {
   /*
-   * Лист живёт между HUD и доком: шесть кнопок раздела остаются на экране и
-   * работают даже когда открыт подэкран — переключиться можно одним тапом.
+   * Лист живёт между HUD и доком: --dock-h оболочка мерит по факту, поэтому
+   * кнопки разделов внизу никогда не оказываются под содержимым листа.
    */
   .panelcol {
     bottom: var(--dock-h);
-    bottom: calc(var(--dock-h) + env(safe-area-inset-bottom));
     max-height: calc(100vh - var(--hud-bottom, 54px) - var(--dock-h) - 10px);
-    max-height: calc(100dvh - var(--hud-bottom, 54px) - var(--dock-h) - env(safe-area-inset-bottom) - 10px);
+    max-height: calc(100dvh - var(--hud-bottom, 54px) - var(--dock-h) - 10px);
   }
 
-  /* Затемнение не накрывает док: иначе тап по вкладке закрывал бы лист. */
+  /* Затемнение не накрывает док: иначе тап по кнопке раздела закрывал бы лист. */
   .sheet-backdrop {
     bottom: var(--dock-h);
-    bottom: calc(var(--dock-h) + env(safe-area-inset-bottom));
   }
 
   .panelcol .sidescroll {

@@ -328,9 +328,14 @@ if (claimSystem) {
   expect('site panel explains the funnel', plannedSetup.includes('Закладка станции'));
   expect('site panel lists the steps', plannedSetup.includes('step'));
   expect('site panel says where to claim', plannedSetup.includes('ничей') || plannedSetup.includes('ничья'));
+  expect(
+    'site panel keeps the claim local',
+    plannedSetup.includes('где стоит корабль') || plannedSetup.includes('под кораблём'),
+  );
   if (claimPlanet) {
-    console.log(`  info site chosen: ${chooseSite(state, claimSystem.id, claimPlanet.id)}`);
+    // Участок выбирают с борта: корабль должен быть в самой системе.
     ship.systemId = claimSystem.id;
+    console.log(`  info site chosen: ${chooseSite(state, claimSystem.id, claimPlanet.id)}`);
     const chosen = render('StationPanel (site chosen)', <StationPanel state={state} run={run} />);
     expect('chosen site is named in the panel', chosen.includes(claimSystem.name));
     expect('foundation requirements are listed', chosen.includes('Требования закладки склада'));

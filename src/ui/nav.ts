@@ -16,17 +16,16 @@ export type TabId = 'system' | 'cargo' | 'ship' | 'fleet' | 'news' | 'settings';
 export interface TabDef {
   id: TabId;
   label: string;
-  hint: string;
   title: string;
 }
 
 export const TABS: TabDef[] = [
-  { id: 'system', label: 'СИСТЕМА', hint: 'система и станции', title: 'Система: описание, планеты, станции, исследование, ресурсы и прыжки' },
-  { id: 'cargo', label: 'ГРУЗ', hint: 'трюм и склады', title: 'Трюм корабля, рынок и склады станций' },
-  { id: 'ship', label: 'КОРАБЛЬ', hint: 'состояние и верфь', title: 'Флагман: состояние, службы и верфь' },
-  { id: 'fleet', label: 'ФЛОТ', hint: 'задания кораблей', title: 'Задания для остальных кораблей' },
-  { id: 'news', label: 'ЛЕНТА', hint: 'сводка и цели', title: 'Сводка, статистика и подсказки' },
-  { id: 'settings', label: 'НАСТРОЙКИ', hint: 'пауза и обновления', title: 'Пауза, темп времени, интерфейс и обновления' },
+  { id: 'system', label: 'СИСТЕМА', title: 'Система: описание, планеты, станции, исследование, ресурсы и прыжки' },
+  { id: 'cargo', label: 'ГРУЗ', title: 'Трюм корабля, рынок и склады станций' },
+  { id: 'ship', label: 'КОРАБЛЬ', title: 'Флагман: состояние, службы и верфь' },
+  { id: 'fleet', label: 'ФЛОТ', title: 'Задания для остальных кораблей' },
+  { id: 'news', label: 'ЛЕНТА', title: 'Сводка, статистика и подсказки' },
+  { id: 'settings', label: 'НАСТРОЙКИ', title: 'Пауза, темп времени, интерфейс и обновления' },
 ];
 
 export function tabDef(id: TabId): TabDef {

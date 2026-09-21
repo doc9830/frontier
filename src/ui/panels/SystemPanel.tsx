@@ -8,7 +8,7 @@ import { resource } from '../../game/data/resources.ts';
 import { planetKindOf, PLANET_BONUS_LABEL } from '../../game/data/planets.ts';
 import { SERVICE_INFO, dockedStations, stationTypeLabel } from '../../game/data/stations.ts';
 import type { StationService } from '../../game/data/stations.ts';
-import { stationPhaseLabel } from '../../game/site/site.ts';
+import { stationPhaseLabel, localSiteCandidate } from '../../game/site/site.ts';
 import { miningStatus } from '../../game/sim/mining.ts';
 import { duration, num, pct, riskText, threatColor } from '../format.ts';
 import { hops } from '../../game/plural.ts';
@@ -43,6 +43,8 @@ export function SystemPanel({
   const beltsKnown = system.belts.filter((belt) => belt.discovered).length;
   const stationsHere = dockedStations(state, ship.systemId);
   const ownRecord = stationsHere.find((entry) => entry.own) ?? null;
+  /** Участок ищут только в системе, где стоит корабль, — подсказка для воронки. */
+  const local = localSiteCandidate(state);
 
   return (
     <>
@@ -153,7 +155,10 @@ export function SystemPanel({
           <>
             <Hint>
               {state.station.phase === 'planned'
-                ? 'Своей станции ещё нет: выберите ничью отсканированную систему и заложите склад.'
+                ? local?.ok
+                  ? `Система ${system.name} годится под закладку: выберите планету и заложите склад.`
+                  : (local?.reasons[0] ??
+                    'Свою станцию ставят только в системе, где стоит корабль: удалённых закладок нет.')
                 : `Ваша база стоит в системе ${
                     state.systems[state.station.systemId]?.name ?? '—'
                   } — управление и стройка доступны отсюда.`}

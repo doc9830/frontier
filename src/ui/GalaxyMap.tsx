@@ -22,9 +22,28 @@ interface View {
   y: number;
 }
 
+/**
+ * Поле галактики выросло вместе с числом систем (128), поэтому зум считается от
+ * размера поля: SPAN — во сколько раз поле больше базового. Так видимый участок
+ * карты и плотность звёзд на экране остаются прежними, а не 128 точек разом.
+ */
+const SPAN = FIELD.width / 1240;
 const MIN_K = 0.7;
-const MAX_K = 4;
+const MAX_K = 4 * SPAN;
 const PAD = 90;
+
+/** Стартовый масштаб: телефон показывает окрестности корабля ближе, десктоп — шире. */
+function defaultK(): number {
+  const phone = typeof window !== 'undefined' && window.matchMedia('(max-width: 900px)').matches;
+  return (phone ? 1.7 : 1) * SPAN;
+}
+
+/** Вид, в котором корабль (или центр поля) стоит посреди карты. */
+function frameView(target: { x: number; y: number } | undefined | null, k: number): View {
+  const x = target?.x ?? FIELD.width / 2;
+  const y = target?.y ?? FIELD.height / 2;
+  return { k, x: FIELD.width / 2 - x * k, y: FIELD.height / 2 - y * k };
+}
 
 function nodeRadius(system: StarSystem): number {
   const population = Math.max(0, system.population) / 1_000_000;
@@ -63,19 +82,13 @@ export function GalaxyMap({
 
   /**
    * The phone shell is map-first, so the whole field would leave a tiny cluster in
-   * the middle: start zoomed in on the ship. Desktop keeps the fitting overview.
+   * the middle: both shells start framed on the ship instead of the whole field.
    */
   const focused = useRef(false);
   useEffect(() => {
     if (focused.current || !current) return;
     focused.current = true;
-    if (!window.matchMedia('(max-width: 900px)').matches) return;
-    const k = 1.7;
-    setView({
-      k,
-      x: FIELD.width / 2 - current.position.x * k,
-      y: FIELD.height / 2 - current.position.y * k,
-    });
+    setView(frameView(current.position, defaultK()));
   }, [current]);
 
   const lanes = useMemo(() => {
@@ -471,7 +484,7 @@ export function GalaxyMap({
           <Btn size="small" onClick={() => zoomAt(1 / 1.25)}>
             −
           </Btn>
-          <Btn size="small" onClick={() => setView({ k: 1, x: 0, y: 0 })}>
+          <Btn size="small" onClick={() => setView(frameView(current?.position, defaultK()))}>
             СБРОС
           </Btn>
           <div className="legend">

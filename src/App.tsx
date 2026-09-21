@@ -36,9 +36,11 @@ import { isAndroidShell, onShellBack } from './platform/android.ts';
 
 /**
  * Оболочка игры: интро, HUD, карта, нижний док на шесть разделов и лист с
- * содержимым. Внутри раздела живёт стек подэкранов (станция, рынок, верфь,
- * склад, исследование, ресурсы): «назад» возвращает на шаг, а на пустом экране
- * отдаёт управление оболочке Android — она закрывает приложение двойным тапом.
+ * содержимым. Док — это только кнопки разделов: закрытый лист целиком уезжает
+ * под экран, поэтому кнопки всегда видны и нажимаются. Внутри раздела живёт стек
+ * подэкранов (станция, рынок, верфь, склад, исследование, ресурсы): «назад»
+ * возвращает на шаг, а на пустом экране отдаёт управление оболочке Android — она
+ * закрывает приложение двойным тапом.
  */
 
 export function App() {
@@ -54,6 +56,7 @@ export function App() {
   /** Прыжок, ждущий подтверждения (настройка «подтверждать прыжок»). */
   const [jumpTarget, setJumpTarget] = useState<string | null>(null);
   const hudRef = useRef<HTMLElement | null>(null);
+  const dockRef = useRef<HTMLElement | null>(null);
 
   const screen = screens.length > 0 ? screens[screens.length - 1] : null;
 
@@ -162,6 +165,33 @@ export function App() {
       root.style.removeProperty('--hud-bottom');
     };
   }, [hasGame, hudOpen]);
+
+  // Высота дока меряется так же, как HUD: лист, затемнение, лента и всплывающие
+  // сообщения отсчитываются от --dock-h, поэтому кнопки разделов никогда не
+  // оказываются под панелью — даже с системной навигацией телефона.
+  useEffect(() => {
+    const node = dockRef.current;
+    const root = document.documentElement;
+    if (!node) {
+      root.style.removeProperty('--dock-h');
+      return;
+    }
+    const apply = (): void => {
+      const height = Math.round(node.getBoundingClientRect().height);
+      if (height > 0) root.style.setProperty('--dock-h', `${height}px`);
+    };
+    apply();
+    window.addEventListener('resize', apply);
+    window.addEventListener('orientationchange', apply);
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(apply);
+    observer?.observe(node);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', apply);
+      window.removeEventListener('orientationchange', apply);
+      root.style.removeProperty('--dock-h');
+    };
+  }, [hasGame]);
 
   // Android shell: it asks the game to save before reloading into a new bundle.
   useEffect(() => {
@@ -402,16 +432,17 @@ export function App() {
 
       {sheetOpen ? <div className="sheet-backdrop" onClick={closeSheet} /> : null}
 
-      <nav className="dock">
+      <nav className="dock" ref={dockRef}>
         {TABS.map((entry) => (
           <button
             key={entry.id}
             type="button"
             className={sheetOpen && tab === entry.id ? 'dock-btn active' : 'dock-btn'}
+            title={entry.title}
+            aria-label={entry.title}
             onClick={() => toggleTab(entry.id)}
           >
             <b>{entry.label}</b>
-            <span>{entry.hint}</span>
           </button>
         ))}
       </nav>

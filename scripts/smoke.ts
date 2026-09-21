@@ -7,6 +7,7 @@
  */
 import type { GameState, ResourceId } from '../src/game/types.ts';
 import { createGameState, playerShip, SAVE_VERSION } from '../src/game/state/create.ts';
+import { SYSTEM_COUNT } from '../src/game/universe/generate.ts';
 import { exportSave, importSave } from '../src/game/save.ts';
 import { advance, catchUp, resolvePendingEvent } from '../src/game/sim/engine.ts';
 import { eventDef, EVENT_DEFS, buildPayload } from '../src/game/events/events.ts';
@@ -39,7 +40,13 @@ import {
 } from '../src/game/sim/mining.ts';
 import { beltReserve } from '../src/game/data/belts.ts';
 import { planetKindOf } from '../src/game/data/planets.ts';
-import { FOUNDATION_MATERIALS, FOUNDATION_SECONDS, buildingSeconds, stationPhase } from '../src/game/site/site.ts';
+import {
+  localSiteCandidate,
+  FOUNDATION_MATERIALS,
+  FOUNDATION_SECONDS,
+  buildingSeconds,
+  stationPhase,
+} from '../src/game/site/site.ts';
 import {
   baseStationHaul,
   chooseSite,
@@ -137,6 +144,24 @@ const state = createGameState('SMOKE-1', 'TESTER');
 const ship = playerShip(state);
 const homeFaction = state.systems[ship.systemId].factionId;
 check('seed kept', state.seed === 'SMOKE-1');
+check('galaxy holds 128 systems', state.systemIds.length === SYSTEM_COUNT, `${state.systemIds.length} systems`);
+const spacings: number[] = [];
+for (let i = 0; i < state.systemIds.length; i += 1) {
+  for (let j = i + 1; j < state.systemIds.length; j += 1) {
+    const a = state.systems[state.systemIds[i]].position;
+    const b = state.systems[state.systemIds[j]].position;
+    spacings.push(Math.hypot(a.x - b.x, a.y - b.y));
+  }
+}
+check(
+  'systems keep their distance on the map',
+  Math.min(...spacings) >= 100,
+  `min ${Math.round(Math.min(...spacings))} units`,
+);
+check(
+  'every system has at least one lane',
+  state.systemIds.every((id) => state.systems[id].connections.length > 0),
+);
 check('galaxy has systems', state.systemIds.length >= 20, `${state.systemIds.length} systems`);
 check('four factions', state.factionIds.length === 4, state.factionIds.join(', '));
 check('home system charted', !!state.systems[state.player.homeSystemId]?.discovered);
@@ -313,6 +338,29 @@ if (claim) {
   const planet = claim.planets.find((entry) => planetKindOf(entry).buildable);
   check('lawless system offers a buildable planet', !!planet, planet ? `${planet.name} (${planet.type})` : 'none');
   if (planet) {
+    // Удалённую закладку фронтир не знает: участок выбирают только с борта.
+    const away = state.systemIds.find((id) => id !== claim.id && state.systems[id].factionId !== null);
+    if (away) {
+      ship.systemId = away;
+      const remote = localSiteCandidate(state);
+      check('site cannot be picked remotely', chooseSite(state, claim.id, planet.id) === false);
+      check(
+        'a remote system explains why it does not qualify',
+        remote?.ok === false && (remote.reasons[0] ?? '').includes('контроле'),
+        remote?.reasons[0] ?? 'no reason',
+      );
+      ship.systemId = claim.id;
+    }
+    // Без полного скана планет не видно — и участок не закрепить.
+    claim.scanned = false;
+    check(
+      'site needs a full scan',
+      chooseSite(state, claim.id, planet.id) === false &&
+        (localSiteCandidate(state)?.reasons ?? []).some((reason) => reason.includes('скан')),
+      localSiteCandidate(state)?.reasons[0] ?? 'no reason',
+    );
+    claim.scanned = true;
+    check('the local candidate is ready', localSiteCandidate(state)?.ok === true);
     check('site chosen', chooseSite(state, claim.id, planet.id));
     check('phase is planned with a fixed site', stationPhase(state) === 'planned' && state.station.sitePlanetId === planet.id);
     check('site is locked to a free system', chooseSite(state, state.player.homeSystemId, planet.id) === false);
@@ -621,12 +669,14 @@ const yardShip = playerShip(yardState);
 yardState.player.credits += 500000;
 yardShip.cargo = { metal: 4000, electronics: 800 };
 
-const yardSystems = yardState.systemIds.filter((id) =>
-  yardState.systems[id].stations.some(
+const yardHere = (id: string) =>
+  yardState.systems[id].stations.find(
     (st) => st.hasShipyard && serviceAccess(yardState, st, 'shipyard').ok,
-  ),
-);
+  );
+const yardSystems = yardState.systemIds.filter((id) => !!yardHere(id));
 check('faction systems run shipyards', yardSystems.length > 0, `${yardSystems.length} systems`);
+/** Сборки разных доков проверяются на верфях фракций: у них есть клеймо. */
+const factionYards = yardSystems.filter((id) => !!yardHere(id)?.factionId);
 const homeYard = shipyardHere(yardState, yardShip);
 check(
   'the start system bolts on modules',
@@ -655,7 +705,7 @@ if (yardlessId) {
   console.log('  skip every system has a shipyard');
 }
 
-const yardSystemId = yardSystems[0];
+const yardSystemId = factionYards[0] ?? yardSystems[0];
 yardShip.systemId = yardSystemId;
 const yard = shipyardHere(yardState, yardShip);
 check('module installs at a faction shipyard', installModule(yardState, yardShip, 'shield', 1) === true);
@@ -668,14 +718,10 @@ check(
 );
 
 // Модули разных верфей должны уживаться на одном корпусе.
+const yardFaction = yardHere(yardSystemId)?.factionId ?? null;
 const otherYardId = yardSystems.find((id) => {
-  const current = yardState.systems[yardSystemId].stations.find(
-    (st) => st.hasShipyard && serviceAccess(yardState, st, 'shipyard').ok,
-  );
-  const other = yardState.systems[id].stations.find(
-    (st) => st.hasShipyard && serviceAccess(yardState, st, 'shipyard').ok,
-  );
-  return !!other?.factionId && !!current?.factionId && other.factionId !== current.factionId;
+  const other = yardHere(id);
+  return !!yardFaction && !!other?.factionId && other.factionId !== yardFaction;
 });
 if (otherYardId) {
   yardShip.systemId = otherYardId;

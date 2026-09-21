@@ -11,14 +11,15 @@ import {
   haulFreeCargo,
   materialsText,
 } from '../../game/actions/site.ts';
-import { FOUNDATION_SECONDS, chosenSite, phaseSteps, siteCandidates, stationPhase } from '../../game/site/site.ts';
+import { FOUNDATION_SECONDS, chosenSite, localSiteCandidate, phaseSteps, stationPhase } from '../../game/site/site.ts';
 import { cr, duration, num } from '../format.ts';
 import { Btn, Hint, Panel, Row, Steps, Tag } from '../kit.tsx';
 
 /**
  * Воронка закладки станции: подэкран «Строительство станции» в разделе
  * «Система». Пока склад не поставлен, это инструкция из пяти шагов:
- * ничья система → скан → участок → перевозка → база.
+ * ничья система под кораблём → скан → участок → перевозка → база.
+ * Выбрать участок можно только там, где стоит корабль: удалённых закладок нет.
  */
 
 export function SiteSetup({
@@ -34,7 +35,8 @@ export function SiteSetup({
   const info = foundationState(state);
   const haul = baseStationHaul(state);
   const missing = baseStationMissing(state);
-  const candidates = siteCandidates(state).slice(0, 10);
+  /** Участок ищут только в системе, где стоит корабль. */
+  const local = localSiteCandidate(state);
   const hereSystem = ship ? state.systems[ship.systemId] : null;
 
   return (
@@ -50,7 +52,7 @@ export function SiteSetup({
         <Steps steps={phaseSteps(state)} />
         <Row
           label="Система"
-          value={site ? `${site.system.name} · прыжков ${candidates.find((c) => c.system.id === site.system.id)?.hops ?? '?'}` : 'не выбрана'}
+          value={site ? `${site.system.name} · вы здесь` : hereSystem ? `${hereSystem.name} · вы здесь` : '—'}
         />
         <Row label="Планета" value={site ? `${site.planet.name} (${site.kind.label})` : '—'} />
         <Row label="Бонус площадки" value={site ? site.planetInfo.bonusText : '—'} />
@@ -128,52 +130,59 @@ export function SiteSetup({
       {phase === 'planned' ? (
         <Panel title="Куда поставить станцию" tight>
           <Hint>
-            Частную станцию ставят только в ничей системе и только на планету с твёрдой корой. Сначала систему нужно
-            просканировать («Система» → «Исследование»), затем выбрать планету здесь и привезти металл в трюме.
+            Частную станцию ставят только в системе, где стоит корабль, и только на ничьей земле: фракции свои системы
+            под закладку не отдают. Сначала полный скан системы («Система» → «Исследование»), потом планета с твёрдой
+            корой — металл для закладки везут в трюме.
           </Hint>
-          {candidates.length === 0 ? (
-            <Hint>Подходящих систем пока не видно: разведайте соседей и проведите полный скан.</Hint>
-          ) : null}
-          {candidates.map((candidate) => (
-            <div className="list-row col" key={candidate.system.id}>
-              <div className="list-main">
-                <b>
-                  {candidate.system.name}{' '}
-                  <span className="dim">
-                    {hereSystem?.id === candidate.system.id
-                      ? 'вы здесь'
-                      : candidate.hops >= 0
-                        ? `${num(candidate.hops)} прыжк.`
-                        : 'маршрут неизвестен'}
-                  </span>
-                </b>
-                <span className="dim">
-                  {candidate.free ? 'ничья система' : 'под контролем фракции'} ·{' '}
-                  {candidate.scanned ? `планет ${num(candidate.planets.length)}` : 'нужен полный скан'}
-                </span>
-                {candidate.reasons.map((reason) => (
-                  <span className="dim" key={reason}>
-                    {reason}
-                  </span>
-                ))}
-              </div>
-              {candidate.buildable.length > 0 ? (
-                <div className="row-actions">
-                  {candidate.buildable.slice(0, 3).map((planet) => (
-                    <Btn
-                      key={planet.planet.id}
-                      size="tiny"
-                      kind={site?.planet.id === planet.planet.id ? 'primary' : undefined}
-                      title={`${planet.planet.name}: ${planet.bonusText}`}
-                      onClick={() => run((draft) => chooseSite(draft, candidate.system.id, planet.planet.id))}
-                    >
-                      {planet.planet.name}
-                    </Btn>
+          {local ? (
+            <>
+              <Row
+                label="Система под кораблём"
+                value={`${local.system.name} · ${local.free ? 'ничья система' : 'под контролем фракции'} · ${
+                  local.scanned ? `планет ${num(local.planets.length)}` : 'нужен полный скан'
+                }`}
+              />
+              {local.reasons.length > 0 ? (
+                <ul className="cargo-help">
+                  {local.reasons.map((reason) => (
+                    <li key={reason} className="dim">
+                      {reason}
+                    </li>
                   ))}
-                </div>
+                </ul>
               ) : null}
-            </div>
-          ))}
+              {local.planets.map((planet) => (
+                <div className="list-row" key={planet.planet.id}>
+                  <div className="list-main">
+                    <b>
+                      {planet.planet.name}{' '}
+                      {site?.planet.id === planet.planet.id ? <span className="dim">· участок закреплён</span> : null}
+                    </b>
+                    <span className="dim">
+                      {planet.kind.label} · {planet.buildable ? planet.bonusText : 'закладка невозможна'}
+                    </span>
+                  </div>
+                  {planet.buildable ? (
+                    <div className="row-actions">
+                      <Btn
+                        size="tiny"
+                        kind={site?.planet.id === planet.planet.id ? 'primary' : undefined}
+                        title={`Закрепить участок на ${planet.planet.name}`}
+                        onClick={() => run((draft) => chooseSite(draft, local.system.id, planet.planet.id))}
+                      >
+                        {site?.planet.id === planet.planet.id ? 'ВЫБРАНО' : 'ВЫБРАТЬ'}
+                      </Btn>
+                    </div>
+                  ) : null}
+                </div>
+              ))}
+              {local.scanned && local.planets.length === 0 ? (
+                <Hint>В системе нет планет: закладку ставить не на что.</Hint>
+              ) : null}
+            </>
+          ) : (
+            <Hint>Система под кораблём не найдена: обновите страницу или начните новую галактику.</Hint>
+          )}
         </Panel>
       ) : null}
     </>

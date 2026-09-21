@@ -6,7 +6,7 @@ import { totalSlots } from '../../game/data/buildings.ts';
 import { slotsUsed, storageCapacity, storageUsed } from '../../game/sim/station.ts';
 import { fleetCap } from '../../game/sim/fleet.ts';
 import { moduleOffers, shipyardHere } from '../../game/actions/outfitting.ts';
-import { stationPhase, chosenSite, siteCandidates } from '../../game/site/site.ts';
+import { stationPhase, chosenSite, localSiteCandidate } from '../../game/site/site.ts';
 import { foundationState } from '../../game/actions/site.ts';
 import { cr, newsTag, num } from '../format.ts';
 import { Btn, Hint, Panel, Row, Tag } from '../kit.tsx';
@@ -44,15 +44,19 @@ export function NewsPanel({
   // бессмысленны.
   if (phase === 'planned') {
     if (!site) {
-      const candidates = siteCandidates(state);
+      // Участок ищут только в системе под кораблём: удалённых закладок нет.
+      const local = localSiteCandidate(state);
       suggestions.push({
-        text: 'Участка нет: найдите ничью систему, просканируйте её и выберите планету с твёрдой корой.',
+        text:
+          local && local.ok
+            ? `Система ${local.system.name} годится под закладку: выберите планету с твёрдой корой и заложите склад.`
+            : (local?.reasons[0] ?? 'Участка нет: нужна ничья система под кораблём с полным сканом.'),
         dest: destination('system', 'site'),
         label: 'УЧАСТОК',
       });
-      if (candidates.length === 0) {
+      if (local && !local.scanned) {
         suggestions.push({
-          text: 'Ничьих систем на карте не видно — расширьте карту сканером.',
+          text: 'Полный скан системы открывает планеты: без него участок не закрепить.',
           dest: destination('system', 'research'),
           label: 'ИССЛЕДОВАНИЕ',
         });

@@ -70,7 +70,10 @@ export function foundationState(state: GameState): FoundationState {
   const phase = stationPhase(state);
   const haveMaterials: Amounts = {};
   const reasons: string[] = [];
-  if (!site) reasons.push('Участок не выбран: нужна ничья отсканированная система и планета с твёрдой корой.');
+  if (!site) reasons.push('Участок не выбран: нужна ничья система под кораблём, полный скан и планета с твёрдой корой.');
+  if (site && site.system.scanned !== true) {
+    reasons.push(`Система ${site.system.name} без полного скана: проведите сканирование.`);
+  }
   const atSite = !!site && !!ship && ship.systemId === site.system.id;
   if (!atSite) reasons.push('Корабль должен стоять в выбранной системе.');
   if (ship?.travel) reasons.push('Сначала завершите перелёт.');
@@ -103,7 +106,7 @@ export function foundationState(state: GameState): FoundationState {
   };
 }
 
-/** Выбор участка: система должна быть ничьей и отсканированной. */
+/** Выбор участка: только в текущей системе, ничьей и отсканированной. */
 export function chooseSite(state: GameState, systemId: string, planetId: string): boolean {
   if (stationPhase(state) !== 'planned') {
     addToast(state, 'Станция уже заложена: участок не меняется.', 'bad');
@@ -112,6 +115,11 @@ export function chooseSite(state: GameState, systemId: string, planetId: string)
   const system = state.systems[systemId];
   if (!system) {
     addToast(state, 'Система не найдена.', 'bad');
+    return false;
+  }
+  const ship = playerShip(state);
+  if (!ship || ship.systemId !== system.id) {
+    addToast(state, 'Участок выбирают с борта: сначала перелетите в эту систему.', 'bad');
     return false;
   }
   if (system.factionId !== null) {
@@ -229,7 +237,7 @@ export const BASE_STATION_MARK = BASE_STATION_LEVEL;
 export function foundationHint(state: GameState): string {
   const info = foundationState(state);
   if (stationPhase(state) !== 'planned') return 'Склад заложен: везите материалы для базовой станции.';
-  if (!info.siteName) return 'Выберите участок: ничья система нужна и полный скан системы.';
+  if (!info.siteName) return 'Выберите участок в этой системе: нужна ничья система, полный скан и планета.';
   if (!info.atSite) return `Перелетите в систему ${info.systemName ?? '—'}: закладку ставят с корабля.`;
   if (!info.materialsOk) return `Не хватает материалов в трюме: ${materialsText(info.materials)}.`;
   if (!info.creditsOk) return `Нужно ${FOUNDATION_CREDITS} кредитов на закладку.`;
