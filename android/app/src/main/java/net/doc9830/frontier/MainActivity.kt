@@ -28,7 +28,10 @@ import org.json.JSONObject
 class MainActivity : Activity() {
     private lateinit var root: FrameLayout
     private lateinit var webView: WebView
-    private lateinit var assetLoader: WebViewAssetLoader
+
+    /** Rebuilt after a bundle install: the handlers decide which files the page sees. */
+    @Volatile
+    private var assetLoader: WebViewAssetLoader = WebViewAssetLoader.Builder().build()
 
     lateinit var updater: Updater
         private set
@@ -134,6 +137,15 @@ class MainActivity : Activity() {
             override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? =
                 assetLoader.shouldInterceptRequest(request.url)
 
+            override fun onPageFinished(view: WebView, url: String) {
+                // A check may have finished before the page was ready; replay the last
+                // state so the update card shows what the shell already knows.
+                val last = UpdateEvents.last
+                if (last.isNotEmpty()) {
+                    view.evaluateJavascript("window.__frontierUpdate && window.__frontierUpdate($last)", null)
+                }
+            }
+
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                 // The shell is a local app: anything pointing outside it is refused.
                 if (request.url.toString().startsWith(ASSET_ORIGIN)) return false
@@ -165,6 +177,9 @@ class MainActivity : Activity() {
         flushSave()
         webView.postDelayed(
             {
+                // The loader is rebuilt here: until the page is served through the new
+                // handlers, a reload would still show the game that came with the APK.
+                assetLoader = buildAssetLoader().build()
                 webView.clearCache(true)
                 webView.clearHistory()
                 webView.loadUrl("$ASSET_ORIGIN/index.html")
