@@ -1,0 +1,19 @@
+{
+  "name": "FRONTIER",
+  "short_name": "FRONTIER",
+  "description": "Процедурная космическая песочница: торговля, добыча, своя станция и флот.",
+  "start_url": ".",
+  "scope": ".",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#05080a",
+  "theme_color": "#05080a",
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

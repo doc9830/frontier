@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The game paints its own background; the window matches it so no white flash appears. -->
+    <color name="frontier_bg">#04070a</color>
+    <color name="frontier_accent">#41f0c1</color>
+    <color name="frontier_icon_bg">#071019</color>
+</resources>

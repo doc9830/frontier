@@ -1,0 +1,80 @@
+import type { ShipTypeDef, ShipTypeId } from '../types.ts';
+
+export const SHIP_TYPES: ShipTypeDef[] = [
+  {
+    id: 'scout',
+    name: 'Скаут',
+    role: 'Разведчик',
+    price: 14000,
+    hull: 400,
+    shield: 150,
+    cargo: 10,
+    fuel: 120,
+    jumpRange: 10,
+    speed: 1.8,
+    combat: 2,
+    mining: 1,
+    scanner: 8,
+    power: 60,
+    description: 'Быстрый, с дальним прыжком, но тонкий корпус. Корабль, с которого вы начинаете.',
+  },
+  {
+    id: 'miner',
+    name: 'Рудокоп',
+    role: 'Промышленный',
+    price: 26000,
+    hull: 600,
+    shield: 200,
+    cargo: 35,
+    fuel: 120,
+    jumpRange: 5,
+    speed: 0.8,
+    combat: 1,
+    mining: 8,
+    scanner: 3,
+    power: 80,
+    description: 'Бурит пояса астероидов. Медленный, но быстро окупает себя.',
+  },
+  {
+    id: 'hauler',
+    name: 'Тяжеловоз',
+    role: 'Грузовой',
+    price: 34000,
+    hull: 900,
+    shield: 300,
+    cargo: 100,
+    fuel: 180,
+    jumpRange: 5,
+    speed: 0.6,
+    combat: 2,
+    mining: 2,
+    scanner: 2,
+    power: 90,
+    description: 'Трюм на 100 единиц. Основа любого торгового маршрута.',
+  },
+  {
+    id: 'corvette',
+    name: 'Корвет',
+    role: 'Боевой',
+    price: 48000,
+    hull: 700,
+    shield: 600,
+    cargo: 20,
+    fuel: 140,
+    jumpRange: 7,
+    speed: 1.4,
+    combat: 9,
+    mining: 0,
+    scanner: 3,
+    power: 120,
+    description: 'Канонерка для пиратских трасс и эскортной службы.',
+  },
+];
+
+const SHIP_MAP: Record<string, ShipTypeDef> = Object.fromEntries(
+  SHIP_TYPES.map((s) => [s.id, s]),
+);
+
+export function shipType(id: ShipTypeId): ShipTypeDef {
+  return SHIP_MAP[id];
+}
