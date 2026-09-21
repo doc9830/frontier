@@ -37,4 +37,43 @@ class WebAssetHandlerTest {
     fun honoursACustomRoot() {
         assertEquals("game/version.json", bundledAssetPath("/version.json", root = "game"))
     }
+
+    @Test
+    fun marksTheBundleAsJavaScript() {
+        // A module script without a JavaScript MIME type is refused outright, and the
+        // screen stays empty — the WebView is strict exactly here.
+        assertEquals("text/javascript" to "UTF-8", mimeTypeFor("assets/index-abc123.js"))
+        assertEquals("text/javascript" to "UTF-8", mimeTypeFor("/assets/index-abc123.mjs"))
+    }
+
+    @Test
+    fun marksTheEntryPointAndStylesAsText() {
+        assertEquals("text/html" to "UTF-8", mimeTypeFor("index.html"))
+        assertEquals("text/css" to "UTF-8", mimeTypeFor("assets/index-abc123.css"))
+    }
+
+    @Test
+    fun knowsTheSmallFilesAroundTheGame() {
+        assertEquals("application/json" to "UTF-8", mimeTypeFor("/version.json"))
+        assertEquals("application/manifest+json" to "UTF-8", mimeTypeFor("manifest.webmanifest"))
+        assertEquals("image/svg+xml" to "UTF-8", mimeTypeFor("icon.svg"))
+    }
+
+    @Test
+    fun ignoresCaseAndQueries() {
+        assertEquals("text/javascript" to "UTF-8", mimeTypeFor("assets/app.JS"))
+        assertEquals("text/css" to "UTF-8", mimeTypeFor("assets/app.css?v=2"))
+    }
+
+    @Test
+    fun servesBinaryWithoutACharset() {
+        assertEquals("image/png" to null, mimeTypeFor("assets/ship.png"))
+        assertEquals("font/woff2" to null, mimeTypeFor("assets/fonts/ui.woff2"))
+    }
+
+    @Test
+    fun fallsBackToBytesInsteadOfGuessing() {
+        assertEquals("application/octet-stream" to null, mimeTypeFor("assets/data.bin"))
+        assertEquals("application/octet-stream" to null, mimeTypeFor("LICENSE"))
+    }
 }

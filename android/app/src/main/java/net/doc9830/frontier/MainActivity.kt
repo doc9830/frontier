@@ -2,19 +2,27 @@ package net.doc9830.frontier
 
 import android.app.Activity
 import android.graphics.Color
+import android.graphics.Typeface
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
+import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.webkit.ConsoleMessage
+import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebChromeClient
+import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.Button
 import android.widget.FrameLayout
+import android.widget.LinearLayout
+import android.widget.TextView
 import android.widget.Toast
 import androidx.webkit.WebViewAssetLoader
 import org.json.JSONObject
@@ -29,6 +37,14 @@ class MainActivity : Activity() {
     private lateinit var root: FrameLayout
     private lateinit var webView: WebView
 
+    /**
+     * Shown only when something went wrong: an empty game screen has no other way to
+     * speak, and the phone may have no cable attached.
+     */
+    private lateinit var diagnosticsPanel: LinearLayout
+    private lateinit var diagnosticsText: TextView
+    private lateinit var diagnosticsButton: Button
+
     /** Rebuilt after a bundle install: the handlers decide which files the page sees. */
     @Volatile
     private var assetLoader: WebViewAssetLoader = WebViewAssetLoader.Builder().build()
@@ -36,7 +52,9 @@ class MainActivity : Activity() {
     lateinit var updater: Updater
         private set
 
+    private val consoleTail = ArrayDeque<String>()
     private var lastBackPress = 0L
+    private var lastRendererRestart = 0L
     private var lastNotice: String = ""
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -54,6 +72,15 @@ class MainActivity : Activity() {
         root.addView(
             webView,
             FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT),
+        )
+        diagnosticsPanel = createDiagnostics()
+        root.addView(
+            diagnosticsPanel,
+            FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.BOTTOM,
+            ),
         )
         setContentView(root)
 
@@ -102,6 +129,49 @@ class MainActivity : Activity() {
         return builder
     }
 
+    /**
+     * The panel that speaks when the game cannot: the console tail, the load errors and,
+     * because a broken screen would otherwise be a dead end, a way to pull a new APK.
+     */
+    private fun createDiagnostics(): LinearLayout {
+        diagnosticsText = TextView(this).apply {
+            setTextColor(DIAGNOSTICS_FG)
+            textSize = 11f
+            typeface = Typeface.MONOSPACE
+            setTextIsSelectable(true)
+            setOnClickListener { diagnosticsPanel.visibility = View.GONE }
+        }
+        diagnosticsButton = Button(this).apply {
+            setText(R.string.diagnostics_update)
+            visibility = View.GONE
+            setOnClickListener {
+                visibility = View.GONE
+                toast("Загружаю новую сборку приложения…")
+                updater.applyApkUpdate()
+            }
+        }
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(DIAGNOSTICS_BG)
+            setPadding(28, 28, 28, 28)
+            visibility = View.GONE
+            addView(
+                diagnosticsText,
+                LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                ),
+            )
+            addView(
+                diagnosticsButton,
+                LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                ),
+            )
+        }
+    }
+
     private fun createWebView(): WebView {
         WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
         val view = WebView(this)
@@ -129,7 +199,7 @@ class MainActivity : Activity() {
         view.addJavascriptInterface(Bridge(this), "FrontierAndroid")
         view.webChromeClient = object : WebChromeClient() {
             override fun onConsoleMessage(message: ConsoleMessage): Boolean {
-                android.util.Log.d("FrontierWeb", "${message.message()} @${message.lineNumber()}")
+                record("${message.message()} @${message.lineNumber()}")
                 return true
             }
         }
@@ -144,6 +214,44 @@ class MainActivity : Activity() {
                 if (last.isNotEmpty()) {
                     view.evaluateJavascript("window.__frontierUpdate && window.__frontierUpdate($last)", null)
                 }
+                view.postDelayed({ probe(view) }, PROBE_DELAY_MS)
+            }
+
+            override fun onReceivedError(
+                view: WebView,
+                request: WebResourceRequest,
+                error: WebResourceError,
+            ) {
+                // A missing subresource is noise; an empty main frame is the whole problem.
+                if (request.isForMainFrame) {
+                    showDiagnostics(
+                        "Страница не открылась: ${error.errorCode} ${error.description}\n${request.url}",
+                        offerUpdate = true,
+                    )
+                } else {
+                    record("не отдано: ${request.url} (${error.errorCode} ${error.description})")
+                }
+            }
+
+            override fun onReceivedHttpError(
+                view: WebView,
+                request: WebResourceRequest,
+                response: WebResourceResponse,
+            ) {
+                record("HTTP ${response.statusCode}: ${request.url}")
+            }
+
+            override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
+                showDiagnostics(
+                    "Процесс отрисовки остановлен (авария=${detail.didCrash()}). Перезапускаю приложение.",
+                    offerUpdate = true,
+                )
+                val now = System.currentTimeMillis()
+                if (now - lastRendererRestart > RESTART_GUARD_MS) {
+                    lastRendererRestart = now
+                    recreate()
+                }
+                return true
             }
 
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
@@ -192,6 +300,61 @@ class MainActivity : Activity() {
         webView.evaluateJavascript(FLUSH_JS, null)
     }
 
+    // --- diagnostics ---------------------------------------------------------
+
+    /** Everything the page says lands here, so an empty screen can explain itself. */
+    private fun record(line: String) {
+        Log.d(TAG, line)
+        synchronized(consoleTail) {
+            consoleTail.addLast(line)
+            while (consoleTail.size > CONSOLE_TAIL) consoleTail.removeFirst()
+        }
+    }
+
+    /**
+     * The game is one big script: if it never runs, the screen simply stays empty and a
+     * player has no way to tell why. This panel puts the console output and the load
+     * errors on top of that emptiness, so a phone without a cable can still speak.
+     */
+    private fun showDiagnostics(header: String, offerUpdate: Boolean = false) {
+        val tail = synchronized(consoleTail) { consoleTail.toList() }
+        val text = buildString {
+            append(header)
+            if (tail.isNotEmpty()) {
+                append("\n\n")
+                append(tail.joinToString("\n"))
+            }
+            append("\n\nНажмите на текст, чтобы скрыть.")
+        }
+        runOnUiThread {
+            if (!::diagnosticsPanel.isInitialized) return@runOnUiThread
+            diagnosticsText.text = text
+            diagnosticsButton.visibility = if (offerUpdate) View.VISIBLE else View.GONE
+            diagnosticsPanel.visibility = View.VISIBLE
+            diagnosticsPanel.bringToFront()
+        }
+    }
+
+    /** A page that loaded but stayed empty means the game bundle never ran. */
+    private fun probe(view: WebView) {
+        view.evaluateJavascript(PROBE_JS) { result ->
+            val value = result?.trim('"').orEmpty()
+            val bridge = value.substringAfter("bridge:", "?")
+            when {
+                value.startsWith("noroot") -> showDiagnostics(
+                    "Страница открылась без #root — файлы игры повреждены (bridge: $bridge).",
+                    offerUpdate = true,
+                )
+                value.startsWith("count:0") -> showDiagnostics(
+                    "Игра не отрисовалась: #root пуст (bridge: $bridge).",
+                    offerUpdate = true,
+                )
+                bridge != "object" ->
+                    showDiagnostics("Мост оболочки недоступен (bridge: $bridge): обновления работать не будут.")
+            }
+        }
+    }
+
     // --- behaviour -----------------------------------------------------------
 
     @Deprecated("Back is offered to the game first, then handled here.")
@@ -235,15 +398,31 @@ class MainActivity : Activity() {
         }
     }
 
-    /** A silent check that found something: nudge the player towards the update card. */
+    /**
+     * A silent check that found something: nudge the player towards the update card.
+     * While the game cannot draw, the same events are worth saying out loud — a blank
+     * screen has no card to read them from.
+     */
     private fun announce(json: String) {
         val event = runCatching { JSONObject(json) }.getOrNull() ?: return
-        if (!event.optBoolean("silent") || event.optString("phase") != "available") return
-        val message = "${event.optString("message")} ЛЕНТА → ОБНОВЛЕНИЕ."
-        if (message == lastNotice) return
-        lastNotice = message
-        toast(message)
+        val phase = event.optString("phase")
+        val message = event.optString("message")
+        if (diagnosticsPanelVisible() && phase in SPOKEN_PHASES) {
+            if (message != lastNotice) {
+                lastNotice = message
+                toast(message)
+            }
+            return
+        }
+        if (!event.optBoolean("silent") || phase != "available") return
+        val hint = "$message ЛЕНТА → ОБНОВЛЕНИЕ."
+        if (hint == lastNotice) return
+        lastNotice = hint
+        toast(hint)
     }
+
+    private fun diagnosticsPanelVisible(): Boolean =
+        ::diagnosticsPanel.isInitialized && diagnosticsPanel.visibility == View.VISIBLE
 
     private fun toast(message: String) {
         runOnUiThread { Toast.makeText(this, message, Toast.LENGTH_LONG).show() }
@@ -254,5 +433,20 @@ class MainActivity : Activity() {
         const val GAME_BG = "#04070a"
         const val FLUSH_JS = "window.__frontierFlush && window.__frontierFlush()"
         const val BACK_JS = "window.__frontierBack ? window.__frontierBack() : false"
+        const val TAG = "FrontierShell"
+        const val CONSOLE_TAIL = 12
+        const val PROBE_DELAY_MS = 1200L
+        const val RESTART_GUARD_MS = 5000L
+        val DIAGNOSTICS_BG = 0xE60A0F14.toInt()
+        val DIAGNOSTICS_FG = 0xFF9BE8C4.toInt()
+
+        /** Phases worth a toast while the game cannot draw its own card. */
+        val SPOKEN_PHASES = setOf("error", "busy", "installing", "permission", "ready")
+
+        /** Reports how many children `#root` ended up with and whether the bridge is alive. */
+        const val PROBE_JS = "(function(){var r=document.getElementById('root');" +
+            "var b=typeof window.FrontierAndroid;" +
+            "if(!r)return 'noroot|bridge:'+b;" +
+            "return 'count:'+r.childElementCount+'|bridge:'+b;})()"
     }
 }

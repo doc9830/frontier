@@ -9,7 +9,10 @@ export default defineConfig({
     host: true,
   },
   build: {
-    target: 'es2020',
+    // The game also ships inside an Android WebView, which may lag behind Chrome:
+    // optional chaining and friends are compiled away instead of being left to a
+    // parser that would refuse the whole bundle.
+    target: 'es2017',
     outDir: 'dist',
   },
 });
