@@ -1,7 +1,7 @@
 {
   "name": "frontier",
   "private": true,
-  "version": "0.1.4",
+  "version": "0.2.0",
   "type": "module",
   "description": "FRONTIER — procedurally generated space sandbox prototype (PWA)",
   "scripts": {
@@ -11,6 +11,7 @@
     "typecheck": "tsc",
     "verify": "tsc && npm run smoke && npm run render-check",
     "smoke": "node --experimental-strip-types scripts/smoke.ts",
+    "browser-check": "npm run build && node scripts/browser-check.mjs",
     "render-check": "esbuild scripts/render-check.tsx --bundle --platform=node --format=cjs --jsx=automatic --outfile=node_modules/.cache/render-check.cjs --log-level=warning && node node_modules/.cache/render-check.cjs",
     "web:pack": "node scripts/pack-web.mjs",
     "android:apk": "node scripts/android-build.mjs assembleRelease",

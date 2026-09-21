@@ -13,6 +13,9 @@ import { missionTravelSeconds } from '../exploration/travel.ts';
 import { resourceSymbol } from '../data/resources.ts';
 import { MINING_CYCLE_SECONDS, BELT_APPROACH_SECONDS, beltById, miningBonus, miningYieldPerCycle } from './mining.ts';
 import { addStorage } from './station.ts';
+import { beltReserve, MIN_BELT_RESERVE } from '../data/belts.ts';
+import { stationPhase } from '../site/site.ts';
+import { marketAccessInSystem } from '../actions/trade.ts';
 import { addToast } from './toast.ts';
 import { addNews } from '../news/news.ts';
 import { reputationOf } from '../factions/reputation.ts';
@@ -56,24 +59,36 @@ export function assignMineMission(
     addToast(state, 'Пояс не найден.', 'bad');
     return false;
   }
-  if (shipStats(ship).mining <= 0) {
-    addToast(state, `${ship.name} has no mining equipment.`, 'bad');
+  if (!found.belt.discovered) {
+    addToast(state, `Пояс ${found.belt.name} не нанесён на карты: нужна разведка пояса.`, 'bad');
     return false;
   }
+  if (stationPhase(state) === 'planned') {
+    addToast(state, 'Сначала заложите склад: сгружать руду пока некуда.', 'bad');
+    return false;
+  }
+  if (shipStats(ship).mining <= 0) {
+    addToast(state, `${ship.name} без бурового оборудования.`, 'bad');
+    return false;
+  }
+  const homeSystemId = state.station.systemId || state.player.homeSystemId;
   ship.mission = {
     kind: 'mine',
     beltId,
     beltSystemId: found.systemId,
-    homeSystemId: state.player.homeSystemId,
+    homeSystemId,
     phase: 'outbound',
     arriveAt: state.gameTime + hop(state, ship.systemId, found.systemId, shipStats(ship).speed),
     workUntil: 0,
     cyclesLeft: Math.max(1, cycles),
     expected: {},
+    plan: {},
+    hauled: {},
+    piece: 1,
   };
   ship.travel = null;
   ship.status = 'mining';
-  addToast(state, `${ship.name} назначен в пояс ${found.belt.name}.`, 'info');
+  addToast(state, `${ship.name} назначен в пояс ${found.belt.name} (рейсов: ${Math.max(1, cycles)}).`, 'info');
   return true;
 }
 
@@ -87,6 +102,16 @@ export function assignTradeMission(
 ): boolean {
   if (buySystemId === sellSystemId) {
     addToast(state, 'Выберите две разные системы для торгового маршрута.', 'bad');
+    return false;
+  }
+  const buyAccess = marketAccessInSystem(state, buySystemId);
+  if (!buyAccess.ok) {
+    addToast(state, buyAccess.reason ?? 'В системе закупки нет рынка.', 'bad');
+    return false;
+  }
+  const sellAccess = marketAccessInSystem(state, sellSystemId);
+  if (!sellAccess.ok) {
+    addToast(state, sellAccess.reason ?? 'В системе продажи нет рынка.', 'bad');
     return false;
   }
   const stats = shipStats(ship);
@@ -169,17 +194,25 @@ export function processFleetShip(state: GameState, ship: Ship): void {
         guard += 1;
         mission.workUntil += MINING_CYCLE_SECONDS;
         const output = miningYieldPerCycle(ship, beltInfo.belt, miningBonus(state));
+        const reserve = beltReserve(beltInfo.belt);
         let total = 0;
         for (const [id, qty] of Object.entries(output) as [ResourceId, number][]) {
-          const added = addCargo(ship, id, qty);
+          const wanted = reserve > MIN_BELT_RESERVE ? Math.min(qty, reserve - total) : 0;
+          if (wanted <= 0) continue;
+          const added = addCargo(ship, id, wanted);
           total += added;
           mission.expected[id] = (mission.expected[id] ?? 0) + added;
+          mission.hauled[id] = (mission.hauled[id] ?? 0) + added;
         }
+        if (total > 0) beltInfo.belt.reserve = Math.max(0, reserve - total);
         ship.minedUnits += total;
         state.player.stats.mined += total;
-        if (total <= 0 || cargoFree(ship) <= 0) break;
+        if (total <= 0 || cargoFree(ship) <= 0 || beltReserve(beltInfo.belt) <= MIN_BELT_RESERVE) break;
       }
-      if (cargoFree(ship) <= 0 || guard >= 120) {
+      if (beltReserve(beltInfo.belt) <= MIN_BELT_RESERVE) {
+        addToast(state, `Пояс ${beltInfo.belt.name} выработан: ${ship.name} возвращается.`, 'bad');
+      }
+      if (cargoFree(ship) <= 0 || guard >= 120 || beltReserve(beltInfo.belt) <= MIN_BELT_RESERVE) {
         mission.phase = 'inbound';
         mission.arriveAt =
           Math.max(now, mission.workUntil) +
@@ -195,7 +228,7 @@ export function processFleetShip(state: GameState, ship: Ship): void {
     ship.cargo = {};
     mission.cyclesLeft -= 1;
     if (lost > 0) addToast(state, `Склад форпоста переполнен: сброшено ${lost} ед.`, 'bad');
-    if (mission.cyclesLeft > 0) {
+    if (mission.cyclesLeft > 0 && beltReserve(beltInfo.belt) > MIN_BELT_RESERVE) {
       mission.phase = 'outbound';
       mission.arriveAt = now + hop(state, ship.systemId, mission.beltSystemId, stats.speed);
       ship.status = 'transit';

@@ -4,9 +4,16 @@ import { resource } from '../../game/data/resources.ts';
 import { RECIPES } from '../../game/data/recipes.ts';
 import { cargoFree, cargoUsed, shipStats } from '../../game/ships/ship.ts';
 import { storageCapacity, storageFree, storageUsed } from '../../game/sim/station.ts';
-import { MINING_CYCLE_SECONDS, beltById, miningBonus, miningYieldPerCycle } from '../../game/sim/mining.ts';
+import {
+  MINING_CYCLE_SECONDS,
+  beltById,
+  miningBonus,
+  miningStatus,
+  miningYieldPerCycle,
+} from '../../game/sim/mining.ts';
 import {
   atMarket,
+  atOwnStation,
   buyPriceAt,
   loadFromStation,
   sellPriceAt,
@@ -14,8 +21,9 @@ import {
   sellStoredResource,
   unloadToStation,
 } from '../../game/actions/trade.ts';
+import { stationPhase } from '../../game/site/site.ts';
 import { barColor, cr, duration, num, pct, unitsText } from '../format.ts';
-import { Btn, Hint, Meter, Panel, Row, Tag } from '../kit.tsx';
+import { Btn, Hint, Meter, Panel, Progress, Row, Tag } from '../kit.tsx';
 
 /**
  * Cargo screen — the answer to "what did I mine and where did it go?".
@@ -51,14 +59,16 @@ export function CargoPanel({
   const system = state.systems[ship.systemId];
   const holdUsed = cargoUsed(ship);
   const holdFree = cargoFree(ship);
+  const founded = stationPhase(state) !== 'planned';
   const storeUsed = storageUsed(state.station);
   const storeCap = storageCapacity(state.station);
   const storeFree = storageFree(state.station);
-  const ownStationHere = state.station.systemId === ship.systemId;
+  const ownStationHere = atOwnStation(state);
   const market = atMarket(state);
   const holdRows = rowList(ship.cargo);
   const storeRows = rowList(state.station.storage);
 
+  const mining = miningStatus(state, ship);
   const mission = ship.mission?.kind === 'mine' ? ship.mission : null;
   const found = mission ? beltById(state, mission.beltId) : null;
   const belt = found?.belt ?? null;
@@ -77,7 +87,9 @@ export function CargoPanel({
             label="Склад станции"
             value={`${num(storeUsed)} / ${num(storeCap)} (свободно ${num(storeFree)})`}
           />
-          <Row label="Где склад" value={`${state.station.name} · ${state.systems[state.station.systemId]?.name ?? '?'}`} />
+          <Row label="Где склад" value={founded ? `${state.station.name} · ${state.systems[state.station.systemId]?.name ?? '?'}` : 'участок не заложен — вкладка СТАНЦИЯ'} />
+          <Row label="Свободный трюм" value={`${num(holdFree)} ед.`} />
+          <Row label="Свободный склад" value={founded ? `${num(storeFree)} ед.` : '—'} />
           <Row label="Кредиты" value={cr(state.player.credits)} />
         </div>
         <Meter
@@ -124,6 +136,25 @@ export function CargoPanel({
         <Panel title="Идёт добыча" actions={<Tag color="#41f0c1">БУРЕНИЕ</Tag>} tight>
           <Row label="Пояс" value={`${belt.name} · ${system?.name ?? '?'}`} />
           <Row label="Богатство пояса" value={`${belt.richness.toFixed(2)}×`} />
+          {mining ? (
+            <>
+              <Progress
+                label={mining.phase === 'approach' ? 'Подход к поясу' : `Заход ${num(mining.piece)}`}
+                fraction={mining.phase === 'approach' ? mining.approachProgress : mining.pieceProgress}
+                color="#ffd166"
+                right={
+                  mining.plannedTotal > 0
+                    ? `${num(mining.hauledTotal)}/${num(mining.plannedTotal)} ед. (${pct(mining.progress)})`
+                    : 'до полного трюма'
+                }
+              />
+              <Row label="Свободно в трюме" value={`${num(mining.cargoFree)} ед.`} />
+              <Row
+                label="Запас пояса"
+                value={mining.exhausted ? 'выработан' : `осталось ${num(mining.reserveLeft)} ед.`}
+              />
+            </>
+          ) : null}
           <Row
             label="Темп добычи"
             value={
@@ -137,8 +168,8 @@ export function CargoPanel({
             .map(([id, qty]) => `${num(qty ?? 0)} ${resource(id as ResourceId).symbol}`)
             .join(' ') || '—'} />
           <Hint>
-            Добыча идёт автоматически, пока в трюме есть место. Чтобы прекратить — кнопка «ОСТАНОВИТЬ ДОБЫЧУ» во
-            вкладке СИСТЕМА.
+            Добыча идёт автоматически, пока в трюме есть место. План вахты, прогресс и кнопка «ОСТАНОВИТЬ ДОБЫЧУ» —
+            во вкладке СИСТЕМА.
           </Hint>
         </Panel>
       ) : null}

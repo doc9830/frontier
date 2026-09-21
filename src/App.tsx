@@ -9,6 +9,7 @@ import { travelTo, cancelTravel } from './game/actions/nav.ts';
 import { atMarket } from './game/actions/trade.ts';
 import { StationPanel } from './ui/panels/StationPanel.tsx';
 import { SystemPanel } from './ui/panels/SystemPanel.tsx';
+import { ExplorePanel } from './ui/panels/ExplorePanel.tsx';
 import { CargoPanel } from './ui/panels/CargoPanel.tsx';
 import { MarketPanel } from './ui/panels/MarketPanel.tsx';
 import { ShipPanel } from './ui/panels/ShipPanel.tsx';
@@ -31,12 +32,13 @@ import { isAndroidShell, onShellBack } from './platform/android.ts';
 
 const TABS: { id: TabId; label: string; title: string }[] = [
   { id: 'system', label: 'СИСТЕМА', title: 'Текущая система, пояса астероидов и прыжки' },
+  { id: 'explore', label: 'РАЗВЕДКА', title: 'Сканер: скан систем, разведка поясов, дальний скан' },
   { id: 'cargo', label: 'ГРУЗ', title: 'Что лежит в трюме и на складе станции' },
   { id: 'market', label: 'РЫНОК', title: 'Купить и продать товары' },
   { id: 'ship', label: 'КОРАБЛЬ', title: 'Модули, ремонт, заправка, покупка корпусов' },
-  { id: 'station', label: 'СТАНЦИЯ', title: 'Стройка, переработка, исследования' },
+  { id: 'station', label: 'СТАНЦИЯ', title: 'Участок, стройка, переработка, исследования' },
   { id: 'fleet', label: 'ФЛОТ', title: 'Задания для остальных кораблей' },
-  { id: 'contracts', label: 'КОНТРАКТЫ', title: 'Доставка грузов за награду' },
+  { id: 'contracts', label: 'КОНТРАКТЫ', title: 'Доска контрактов: доставка грузов за награду' },
   { id: 'news', label: 'ЛЕНТА', title: 'Сводка, статистика и подсказки' },
   { id: 'settings', label: 'НАСТРОЙКИ', title: 'Пауза, темп времени, интерфейс и обновления' },
 ];
@@ -105,6 +107,8 @@ export function App() {
         }
       }
       if (event.key >= '1' && event.key <= '9') setTab(TABS[Number(event.key) - 1].id);
+      // Десятый раздел (настройки) живёт на клавише 0 — иначе он остался бы без горячей клавиши.
+      if (event.key === '0' && TABS[9]) setTab(TABS[9].id);
       if (event.key === 'p' || event.key === 'P' || event.key === 'з') game.togglePause();
     };
     window.addEventListener('keydown', onKey);
@@ -303,6 +307,7 @@ export function App() {
           <div className="sidescroll">
             {tab === 'station' ? <StationPanel state={state} run={game.act} /> : null}
             {tab === 'system' ? <SystemPanel state={state} run={game.act} onJump={requestJump} /> : null}
+            {tab === 'explore' ? <ExplorePanel state={state} run={game.act} /> : null}
             {tab === 'cargo' ? <CargoPanel state={state} run={game.act} /> : null}
             {tab === 'market' ? <MarketPanel state={state} run={game.act} /> : null}
             {tab === 'ship' ? <ShipPanel state={state} run={game.act} /> : null}

@@ -6,16 +6,19 @@ import type {
   ShipTypeId,
 } from '../types.ts';
 import { generateUniverse } from '../universe/generate.ts';
-import { emptyModules, shipStats } from '../ships/ship.ts';
+import { emptyMakers, emptyModules, shipStats } from '../ships/ship.ts';
 import { shipType } from '../data/ships.ts';
 import { addNews } from '../news/news.ts';
 import { createRng } from '../rng.ts';
 import { radarReach, revealAround } from '../sim/travel.ts';
+import { seedContractBoards } from '../economy/contracts.ts';
 import { resourceName } from '../data/resources.ts';
 import type { ResourceId } from '../types.ts';
 
-export const SAVE_VERSION = 1;
-export const START_CREDITS = 14000;
+export const SAVE_VERSION = 3;
+export const START_CREDITS = 20000;
+/** Имя, которое игрок даёт своей будущей станции. */
+export const START_STATION_NAME = 'Станция «Фронтир»';
 
 function emptyBuildings(): Record<BuildingType, number> {
   return {
@@ -43,6 +46,7 @@ export function createShip(typeId: ShipTypeId, systemId: string, name: string): 
     fuel: def.fuel,
     cargo: {},
     modules: emptyModules(),
+    makers: emptyMakers(),
     status: 'docked',
     mission: null,
     travel: null,
@@ -67,18 +71,23 @@ export function createStartingShip(systemId: string): Ship {
   return ship;
 }
 
-export function createStartingStation(systemId: string, name: string): PlayerStation {
-  const buildings = emptyBuildings();
-  buildings.commandCenter = 1;
+/**
+ * Станция новой игры: пока это только лицензия на участок. Игрок сам найдёт
+ * ничью систему, отсканирует её и заложит склад — до этого у него есть корабль,
+ * кредиты и ничего больше.
+ */
+export function createStartingStation(name: string): PlayerStation {
   return {
     id: 'STATION-1',
     name,
-    systemId,
-    level: 1,
-    buildings,
+    systemId: '',
+    sitePlanetId: null,
+    phase: 'planned',
+    level: 0,
+    buildings: emptyBuildings(),
     construction: null,
     production: [],
-    storage: { metal: 80, electronics: 8 },
+    storage: {},
     research: { mining: 0, trade: 0, logistics: 0 },
   };
 }
@@ -108,9 +117,10 @@ export function createGameState(seed: string, playerName = 'CMDR'): GameState {
       stats: { jumps: 0, trades: 0, mined: 0, earned: 0, built: 0, contracts: 0 },
     },
     ships: [],
-    station: createStartingStation(home.id, 'Станция «Фронтир»'),
+    station: createStartingStation(START_STATION_NAME),
     news: [],
     pendingEvent: null,
+    survey: null,
     nextWorldEventAt: 240,
     toast: null,
     gameTime: 0,
@@ -128,9 +138,13 @@ export function createGameState(seed: string, playerName = 'CMDR'): GameState {
   // is what gives the player their first set of jump targets.
   revealAround(state, home.id, radarReach(state));
 
+  // Карты открыты — доски контрактов собираются заново, чтобы у курьеров были
+  // маршруты по уже известным системам.
+  seedContractBoards(state);
+
   addNews(
     state,
-    `${state.station.name} в системе ${home.name} перешла под ваше управление вместе с кораблём класса «Скаут». Удачи.`,
+    `Корпорация выдала вам корабль класса «Скаут», ${START_CREDITS} кр подъёмных и лицензию на закладку станции. Ничья система ждёт на фронтире.`,
     'personal',
     home.id,
   );

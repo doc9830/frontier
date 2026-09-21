@@ -1,4 +1,4 @@
-import type { ModuleDef, ModuleType } from '../types.ts';
+import type { ModuleDef, ModuleGroupId, ModuleType } from '../types.ts';
 
 /**
  * Modules are the only ship upgrade system in the prototype. Each module has
@@ -17,7 +17,7 @@ export const MODULES: ModuleDef[] = [
         name: 'Двигатель Mk I',
         cost: 4200,
         materials: { metal: 40 },
-        power: 20,
+        power: 18,
         buildTime: 20,
         effect: 0.2,
         note: '+20% к скорости',
@@ -55,7 +55,7 @@ export const MODULES: ModuleDef[] = [
         name: 'Прыжковый двигатель Mk I',
         cost: 3600,
         materials: { metal: 30, electronics: 10 },
-        power: 15,
+        power: 14,
         buildTime: 18,
         effect: 4,
         note: '+4 к дальности прыжка, −15% расхода топлива',
@@ -93,7 +93,7 @@ export const MODULES: ModuleDef[] = [
         name: 'Щит Mk I',
         cost: 4000,
         materials: { metal: 35, electronics: 15 },
-        power: 25,
+        power: 24,
         buildTime: 22,
         effect: 120,
         speedMod: -0.02,
@@ -172,7 +172,7 @@ export const MODULES: ModuleDef[] = [
         name: 'Трюм Mk I',
         cost: 3400,
         materials: { metal: 60 },
-        power: 10,
+        power: 9,
         buildTime: 18,
         effect: 20,
         speedMod: -0.05,
@@ -213,7 +213,7 @@ export const MODULES: ModuleDef[] = [
         name: 'Сканер Mk I',
         cost: 3200,
         materials: { metal: 25, electronics: 12 },
-        power: 10,
+        power: 9,
         buildTime: 16,
         effect: 4,
         note: '+4 к радиусу сканирования, выше шанс находок',
@@ -251,7 +251,7 @@ export const MODULES: ModuleDef[] = [
         name: 'Оружие Mk I',
         cost: 5000,
         materials: { metal: 50, electronics: 15 },
-        power: 25,
+        power: 24,
         buildTime: 24,
         effect: 4,
         note: '+4 к бою',
@@ -307,4 +307,56 @@ export function moduleLevel(type: ModuleType, level: number) {
 /** Shipyard level required to install a module of the given level. */
 export function requiredShipyardLevel(level: number): number {
   return Math.max(0, level - 1);
+}
+
+export interface ModuleGroupDef {
+  id: ModuleGroupId;
+  label: string;
+  hint: string;
+  types: ModuleType[];
+}
+
+/**
+ * Разделы верфи: вместо одной простыни из семи модулей игрок видит пять
+ * осмысленных групп и сравнивает варианты внутри группы.
+ */
+export const MODULE_GROUPS: ModuleGroupDef[] = [
+  {
+    id: 'mobility',
+    label: 'ХОД И ПРЫЖОК',
+    hint: 'Скорость перехода, дальность прыжка и расход топлива.',
+    types: ['engine', 'jumpDrive'],
+  },
+  {
+    id: 'defense',
+    label: 'ЗАЩИТА И ЭНЕРГИЯ',
+    hint: 'Щит для схваток и реактор, который даёт лимит под остальные модули.',
+    types: ['shield', 'reactor'],
+  },
+  {
+    id: 'logistics',
+    label: 'ГРУЗ',
+    hint: 'Объём трюма: и торговля, и руда с поясов.',
+    types: ['cargo'],
+  },
+  {
+    id: 'sensors',
+    label: 'СЕНСОРЫ',
+    hint: 'Радиус разведки и шанс найти пояс, обломки или аномалию.',
+    types: ['scanner'],
+  },
+  {
+    id: 'arms',
+    label: 'ВООРУЖЕНИЕ',
+    hint: 'Боевой рейтинг: пираты, эскорт и рейды по контрактам.',
+    types: ['weapon'],
+  },
+];
+
+const GROUP_MAP: Record<string, ModuleGroupDef> = Object.fromEntries(
+  MODULE_GROUPS.flatMap((group) => group.types.map((type) => [type, group])),
+);
+
+export function moduleGroupOf(type: ModuleType): ModuleGroupDef {
+  return GROUP_MAP[type] ?? MODULE_GROUPS[0];
 }

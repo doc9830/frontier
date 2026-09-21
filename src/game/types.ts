@@ -25,6 +25,24 @@ export type ModuleType =
   | 'scanner'
   | 'weapon';
 
+/**
+ * Производитель модуля. Модуль несёт клеймо верфи, которая его поставила, и
+ * вместе с ним — фракционные особенности сборки. Это же поле делает верфи
+ * разных фракций невзаимозаменяемыми: щит Федерации и трюм Хеликса можно
+ * поставить на один корабль и комбинировать бонусы.
+ */
+export type MakerId =
+  | 'standard'
+  | 'federation'
+  | 'helix'
+  | 'colonies'
+  | 'union'
+  | 'lawless'
+  | 'frontier';
+
+/** Группа улучшений: верфь показывает модули разделами, а не одной простыней. */
+export type ModuleGroupId = 'mobility' | 'defense' | 'logistics' | 'sensors' | 'arms';
+
 export type ShipTypeId = 'scout' | 'miner' | 'hauler' | 'corvette';
 
 export type BuildingType =
@@ -38,7 +56,14 @@ export type BuildingType =
   | 'researchLab'
   | 'fleetOffice';
 
-export type ShipStatus = 'docked' | 'transit' | 'mining' | 'trading' | 'escort';
+export type ShipStatus = 'docked' | 'transit' | 'mining' | 'trading' | 'escort' | 'survey';
+
+/** Стадия строительства собственной станции. */
+export type StationPhase = 'planned' | 'foundation' | 'operational';
+
+/** Что именно сканирует корабль. */
+export type SurveyKind = 'belt' | 'system' | 'deep';
+
 
 export type RiskLevel = 'LOW' | 'MEDIUM' | 'HIGH' | 'EXTREME';
 
@@ -168,6 +193,10 @@ export interface SystemStation {
   hasMarket: boolean;
   hasShipyard: boolean;
   hasContracts: boolean;
+  /** Заправка. Необязательное поле: старые сейвы выводят услугу из типа. */
+  hasRefuel?: boolean;
+  /** Ремонт корпуса. */
+  hasRepair?: boolean;
 }
 
 export interface AsteroidBelt {
@@ -177,6 +206,8 @@ export interface AsteroidBelt {
   grades: Partial<Record<ResourceId, Grade>>;
   /** 0.7 .. 1.6 multiplier of mining output */
   richness: number;
+  /** Сколько единиц руды ещё лежит в поясе. Пояс можно выработать. */
+  reserve: number;
   discovered: boolean;
 }
 
@@ -189,10 +220,20 @@ export interface SystemMarket {
   bias: Record<ResourceId, number>;
 }
 
+/**
+ * Контракт доски. `supply` — привези свои товары в эту же систему, `courier` —
+ * фракция выдаёт опечатанный груз, и его надо доставить в другую (уже
+ * открытую игроком) систему: чем дальше маршрут, тем больше платят.
+ */
+export type ContractKind = 'supply' | 'courier';
+
 export interface Contract {
   id: string;
-  kind: 'delivery';
+  kind: ContractKind;
+  /** Система, где выдан контракт: там же он и сдаётся для supply. */
   systemId: string;
+  /** Точка сдачи. Для supply совпадает с systemId. */
+  targetSystemId: string;
   factionId: string | null;
   resource: ResourceId;
   amount: number;
@@ -202,6 +243,12 @@ export interface Contract {
   expiresDay: number;
   /** true once the player has signed the contract */
   accepted: boolean;
+  /** Прыжков от выдачи до точки сдачи — по ним считается награда и описание. */
+  hops: number;
+  /** Расстояние по карте в условных единицах: показывается в описании. */
+  distance: number;
+  /** Курьерский груз уже в трюме и запечатан: продать его нельзя. */
+  cargoLoaded: boolean;
 }
 
 export interface StarSystem {
@@ -223,6 +270,8 @@ export interface StarSystem {
   market: SystemMarket;
   contracts: Contract[];
   discovered: boolean;
+  /** Полный скан системы: известны планеты, их типы и пригодность под станцию. */
+  scanned: boolean;
   history: WorldEvent[];
 }
 
@@ -275,6 +324,12 @@ export type Mission =
       workUntil: number;
       cyclesLeft: number;
       expected: Amounts;
+      /** План вахты: сколько единиц каждого ресурса набурить. Пусто — «до полного трюма». */
+      plan: Amounts;
+      /** Уже поднято за эту вахту. */
+      hauled: Amounts;
+      /** Номер текущего захода бура, для анимации прогресса. */
+      piece: number;
     }
   | {
       kind: 'trade';
@@ -301,7 +356,14 @@ export interface Ship {
   shield: number;
   fuel: number;
   cargo: Amounts;
+  /**
+   * Опечатанный груз: единицы, которые фракция выдала под контракт. Они лежат в
+   * трюме, но их нельзя продать, выгрузить или переработать.
+   */
+  sealed?: Amounts;
   modules: Record<ModuleType, number>;
+  /** Клеймо верфи на каждом модуле: от него зависят характеристики. */
+  makers?: Partial<Record<ModuleType, MakerId>>;
   status: ShipStatus;
   mission: Mission | null;
   travel: Travel | null;
@@ -337,7 +399,12 @@ export interface ProductionRecipe {
 export interface PlayerStation {
   id: string;
   name: string;
+  /** Пусто, пока участок не заложен: система выбирается игроком. */
   systemId: string;
+  /** Планета, на которой стоит станция. */
+  sitePlanetId: string | null;
+  /** Этап строительства: закладка → склад → базовая станция. */
+  phase: StationPhase;
   level: number;
   buildings: Record<BuildingType, number>;
   construction: ConstructionJob | null;
@@ -408,6 +475,20 @@ export interface Toast {
   kind: 'info' | 'good' | 'bad';
 }
 
+/** Активная задача сканирования: одна за раз, привязана к кораблю. */
+export interface SurveyJob {
+  id: string;
+  kind: SurveyKind;
+  /** Система, в которой работает сканер. */
+  systemId: string;
+  /** Для kind = 'belt': какой пояс сканируем. */
+  beltId: string | null;
+  /** Для kind = 'deep': какую соседнюю систему открываем. */
+  targetSystemId: string | null;
+  startedAt: number;
+  finishAt: number;
+}
+
 export interface GameState {
   version: number;
   seed: string;
@@ -423,6 +504,8 @@ export interface GameState {
   station: PlayerStation;
   news: NewsItem[];
   pendingEvent: PendingEvent | null;
+  /** Идущее сканирование, если есть. */
+  survey: SurveyJob | null;
   nextWorldEventAt: number;
   toast: Toast | null;
   gameTime: number;

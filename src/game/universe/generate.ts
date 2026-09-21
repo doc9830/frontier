@@ -15,13 +15,14 @@ import { MINEABLE } from '../data/resources.ts';
 import {
   beltName,
   planetName,
-  planetType,
   starClass,
   stationName,
   systemName,
 } from '../data/names.ts';
 import { clamp, createMarket } from '../economy/market.ts';
-import { createContracts } from '../economy/contracts.ts';
+import { createContracts, destinationsFrom } from '../economy/contracts.ts';
+import { pickPlanetKind, PLANET_KINDS } from '../data/planets.ts';
+import { rollBeltReserve } from '../data/belts.ts';
 
 export interface Universe {
   systems: Record<string, StarSystem>;
@@ -174,12 +175,16 @@ function createBelt(
   // every belt always has at least a little common ore
   if (!grades.ore && rng.chance(0.6)) grades.ore = 'MEDIUM';
 
+  const richness = Math.round(rng.range(0.7, 1.6) * 100) / 100;
+
   return {
     id: `${systemId}:${name}`,
     name,
     systemId,
     grades,
-    richness: Math.round(rng.range(0.7, 1.6) * 100) / 100,
+    richness,
+    // Пояс не бесконечен: запас вычитается вахтами и восстанавливается медленно.
+    reserve: rollBeltReserve(rng, richness),
     discovered: false,
   };
 }
@@ -192,98 +197,89 @@ function createStations(
   security: number,
 ): SystemStation[] {
   const stations: SystemStation[] = [];
-  const owner = factionId;
-  stations.push({
-    id: `ST-${rng.int(100, 999)}`,
-    name: stationName(rng, 'trade'),
-    type: 'trade',
-    factionId: owner,
-    hasMarket: true,
-    hasShipyard: archetype.id === 'industrial' || archetype.id === 'research',
-    hasContracts: true,
+  let counter = rng.int(100, 900);
+  const nextId = (): string => {
+    counter += 1;
+    return `ST-${counter}`;
+  };
+
+  /** Станция фракции: услуги выводятся из типа, заправка есть везде. */
+  const push = (
+    type: SystemStation['type'],
+    flags: { market: boolean; shipyard: boolean; contracts: boolean },
+  ): void => {
+    stations.push({
+      id: nextId(),
+      name: stationName(rng, type),
+      type,
+      factionId,
+      hasMarket: flags.market,
+      hasShipyard: flags.shipyard,
+      hasContracts: flags.contracts,
+      hasRefuel: true,
+      hasRepair: type === 'military' ? rng.chance(0.7) : true,
+    });
+  };
+
+  // «Почта» системы: рынок и доска контрактов есть в каждом узле.
+  push('trade', {
+    market: true,
+    shipyard: archetype.id === 'industrial' || archetype.id === 'research',
+    contracts: true,
   });
 
   if (archetype.id === 'mining' && rng.chance(0.8)) {
-    stations.push({
-      id: `ST-${rng.int(100, 999)}`,
-      name: stationName(rng, 'mining'),
-      type: 'mining',
-      factionId: owner,
-      hasMarket: false,
-      hasShipyard: false,
-      hasContracts: false,
-    });
+    // Добывающая станция работает складом руды: рынок только при высокой охране.
+    push('mining', { market: rng.chance(0.35), shipyard: false, contracts: rng.chance(0.5) });
   }
 
   if (archetype.id === 'research' && rng.chance(0.9)) {
-    stations.push({
-      id: `ST-${rng.int(100, 999)}`,
-      name: stationName(rng, 'research'),
-      type: 'research',
-      factionId: owner,
-      hasMarket: false,
-      hasShipyard: true,
-      hasContracts: false,
-    });
+    push('research', { market: rng.chance(0.4), shipyard: true, contracts: rng.chance(0.6) });
   }
 
   if ((archetype.id === 'industrial' || archetype.id === 'frontier') && rng.chance(0.75)) {
-    stations.push({
-      id: `ST-${rng.int(100, 999)}`,
-      name: stationName(rng, 'industrial'),
-      type: 'industrial',
-      factionId: owner,
-      hasMarket: false,
-      hasShipyard: true,
-      hasContracts: false,
-    });
+    push('industrial', { market: rng.chance(0.3), shipyard: true, contracts: rng.chance(0.5) });
   }
 
   if (factionId && security > 0.62 && rng.chance(0.6)) {
-    stations.push({
-      id: `ST-${rng.int(100, 999)}`,
-      name: stationName(rng, 'military'),
-      type: 'military',
-      factionId: owner,
-      hasMarket: false,
-      hasShipyard: rng.chance(0.4),
-      hasContracts: true,
-    });
+    push('military', { market: false, shipyard: rng.chance(0.4), contracts: true });
   }
 
   if (!factionId) {
-    stations.push({
-      id: `ST-${rng.int(100, 999)}`,
-      name: stationName(rng, 'pirate'),
-      type: 'pirate',
-      factionId: null,
-      hasMarket: true,
-      hasShipyard: rng.chance(0.6),
-      hasContracts: false,
-    });
+    // Безвластие: чёрный рынок обслуживает всех, доска контрактов — как повезёт.
+    push('pirate', { market: true, shipyard: rng.chance(0.6), contracts: rng.chance(0.5) });
   }
 
   return stations;
 }
 
-function createPlanets(rng: Rng, population: number): Planet[] {
+function createPlanets(rng: Rng, population: number, ensureBuildable: boolean): Planet[] {
   const count = rng.int(1, 4);
   const planets: Planet[] = [];
   for (let i = 0; i < count; i += 1) {
-    const type = planetType(rng);
-    const habitable = type === 'terran' || type === 'ocean';
+    const kind = pickPlanetKind(rng);
     planets.push({
       id: `PL-${i}-${rng.int(100, 999)}`,
       name: planetName(rng, i),
-      type,
+      type: kind.name,
       population: Math.round(
-        population *
-          (habitable ? rng.range(0.15, 0.5) : rng.range(0.001, 0.03)) *
-          (i === 0 ? 1.4 : 0.7),
+        population * (rng.range(0.15, 0.5) * kind.habitability + rng.range(0.001, 0.03)) * (i === 0 ? 1.4 : 0.7),
       ),
     });
   }
+  // Ничьи системы обязаны давать хотя бы одну площадку: иначе фронтир
+  // превращается в тупик, а игроку негде заложить станцию.
+  if (ensureBuildable && !planets.some((p) => isBuildable(p))) {
+    const buildable = PLANET_KINDS.filter((k) => k.buildable);
+    const kind = rng.pick(buildable);
+    planets[0].type = kind.name;
+    planets[0].population = Math.round(population * kind.habitability * rng.range(0.05, 0.25));
+  }
   return planets;
+}
+
+function isBuildable(planet: Planet): boolean {
+  return PLANET_KINDS.some((kind) => kind.name === planet.type && kind.buildable);
 }
 
 function connectSystems(rng: Rng, systems: StarSystem[]): void {
@@ -398,6 +394,7 @@ export function generateUniverse(seed: string): Universe {
       market: emptyMarket(),
       contracts: [],
       discovered: false,
+      scanned: false,
       history: [],
     };
     archetypes.set(id, archetype);
@@ -450,6 +447,30 @@ export function generateUniverse(seed: string): Universe {
     sys.factionId = nearestFaction && !rng.chance(lawlessChance) ? nearestFaction : null;
   }
 
+  // --- гарантия фронтира -----------------------------------------------------
+  // Ничьи системы — это «топливо» игры: только там ставят частные станции.
+  // Если случайность оставила их слишком мало, отдаём под безвластие самые
+  // далёкие окраины, чтобы воронка закладки всегда была проходимой.
+  const capitals = Object.values(capitalIds)
+    .map((id) => systems.find((s) => s.id === id))
+    .filter((s): s is StarSystem => !!s);
+  const remoteness = (sys: StarSystem): number => {
+    if (capitals.length === 0) return 0;
+    return Math.min(...capitals.map((c) => distance(sys.position, c.position)));
+  };
+  const MIN_LAWLESS = 3;
+  let lawlessCount = systems.filter((s) => s.factionId === null).length;
+  if (lawlessCount < MIN_LAWLESS) {
+    const candidates = systems
+      .filter((s) => s.factionId !== null)
+      .sort((a, b) => remoteness(b) - remoteness(a));
+    for (const sys of candidates) {
+      if (lawlessCount >= MIN_LAWLESS) break;
+      sys.factionId = null;
+      lawlessCount += 1;
+    }
+  }
+
   // --- population / security ------------------------------------------------
   for (const sys of systems) {
     const factionDef = FACTIONS.find((f) => f.id === sys.factionId) ?? null;
@@ -472,8 +493,11 @@ export function generateUniverse(seed: string): Universe {
     for (let i = 0; i < beltCount; i += 1) {
       sys.belts.push(createBelt(rng, sys.id, beltNames, archetype));
     }
-    sys.planets = createPlanets(rng, sys.population);
+    sys.planets = createPlanets(rng, sys.population, sys.factionId === null);
     sys.stations = createStations(rng, archetype, sys.factionId, sys.security);
+    // Фракционные системы нанесены на карты: планеты и пояса там известны.
+    // Дикий космос приходится разведывать сканером.
+    sys.scanned = sys.factionId !== null;
 
     // Faction specialties shift local production a little.
     const factionDef = FACTIONS.find((f) => f.id === sys.factionId);
@@ -516,8 +540,19 @@ export function generateUniverse(seed: string): Universe {
   }
 
   // --- contracts -----------------------------------------------------------
+  // Курьерские контракты ведут только в уже открытые системы; на старте карта
+  // знает лишь фракционные узлы, остальное игрок открывает сканером.
+  const systemMap: Record<string, StarSystem> = Object.fromEntries(
+    systems.map((s) => [s.id, s]),
+  );
   for (const sys of systems) {
-    sys.contracts = createContracts(sys, rng, START_DAY);
+    sys.contracts = createContracts(
+      sys,
+      rng,
+      START_DAY,
+      undefined,
+      destinationsFrom(systemMap, sys.id),
+    );
   }
 
   // --- player home system --------------------------------------------------
@@ -539,6 +574,7 @@ export function generateUniverse(seed: string): Universe {
   }
   if (!home) home = systems[0];
   home.discovered = true;
+  home.scanned = true;
   for (const belt of home.belts) belt.discovered = true;
 
   const systemRecord: Record<string, StarSystem> = {};

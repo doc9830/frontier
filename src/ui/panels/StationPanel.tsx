@@ -17,7 +17,10 @@ import {
   startProduction,
 } from '../../game/actions/build.ts';
 import { amountsText, barColor, cr, duration, num } from '../format.ts';
-import { Btn, Hint, Meter, Panel, Row, Tag } from '../kit.tsx';
+import { Btn, Hint, Meter, Panel, Progress, Row, Steps, Tag } from '../kit.tsx';
+import { SiteSetup } from './SiteSetup.tsx';
+import { phaseSteps, stationPhase, stationPhaseLabel, BASE_STATION_LEVEL } from '../../game/site/site.ts';
+import { baseStationMissing } from '../../game/actions/site.ts';
 
 /** Home base: construction, refinery queues, research and storage. */
 
@@ -30,6 +33,10 @@ export function StationPanel({
 }) {
   const station = state.station;
   const ship = playerShip(state);
+  // Пока склад не заложен, «Станция» — это инструкция по закладке.
+  if (stationPhase(state) === 'planned') {
+    return <SiteSetup state={state} run={run} />;
+  }
   const here = ship?.systemId === station.systemId;
   const buildings = buildingOffers(state);
   const recipes = recipeOffers(state);
@@ -38,12 +45,17 @@ export function StationPanel({
   const used = storageUsed(station);
   const slotCap = totalSlots(station.level);
   const construction = station.construction;
+  const haulMissing = baseStationMissing(state);
 
   return (
     <>
       <Panel
         title={`Ваша станция · ${station.name}`}
-        actions={<Tag color={here ? '#41f0c1' : undefined}>{here ? 'ВЫ ЗДЕСЬ' : 'УДАЛЁННО'}</Tag>}
+        actions={
+          <Tag color={here ? '#41f0c1' : undefined}>
+            {here ? 'ВЫ ЗДЕСЬ' : 'УДАЛЁННО'} · {stationPhaseLabel(stationPhase(state))}
+          </Tag>
+        }
       >
         <div className="grid3">
           <div className="statbox">
@@ -63,13 +75,26 @@ export function StationPanel({
         </div>
         <Meter label="СКЛАД" value={used} max={capacity} color={barColor(used / Math.max(1, capacity))} />
         <Row label="Содержимое" value={amountsText(station.storage)} />
+        <Row
+          label="Участок"
+          value={
+            station.sitePlanetId
+              ? `${state.systems[station.systemId]?.planets.find((p) => p.id === station.sitePlanetId)?.name ?? '—'} · ${
+                  state.systems[station.systemId]?.name ?? '—'
+                }`
+              : '—'
+          }
+        />
         {construction ? (
           <>
-            <Meter
+            <Progress
               label={`Строится ${buildingDef(construction.building).name} Mk ${construction.targetLevel}`}
-              value={state.gameTime - construction.startedAt}
-              max={Math.max(1, construction.finishAt - construction.startedAt)}
-              suffix={` осталось ${duration(Math.max(0, construction.finishAt - state.gameTime))}`}
+              fraction={
+                (state.gameTime - construction.startedAt) /
+                Math.max(1, construction.finishAt - construction.startedAt)
+              }
+              color="#5ec8ff"
+              right={`осталось ${duration(Math.max(0, construction.finishAt - state.gameTime))}`}
             />
             <div>
               <Btn size="small" kind="bad" onClick={() => run((draft) => cancelConstruction(draft))}>
@@ -82,21 +107,50 @@ export function StationPanel({
         )}
       </Panel>
 
+      {stationPhase(state) === 'foundation' ? (
+        <Panel title="Стройплощадка: путь к базовой станции" tight>
+          <Steps steps={phaseSteps(state)} />
+          <Row label="Нужен командный центр" value={`Mk ${BASE_STATION_LEVEL}`} />
+          {haulMissing.length > 0 ? (
+            <ul className="cargo-help">
+              {haulMissing.map((reason) => (
+                <li key={reason} className="dim">
+                  {reason}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <Hint>Всё для базовой станции готово: стройте командный центр ниже.</Hint>
+          )}
+          <Hint>
+            Пока КЦ Mk{BASE_STATION_LEVEL} не введён в строй, доступны только склад и сам командный центр — остальные
+            постройки откроются вместе с базовой станцией.
+          </Hint>
+        </Panel>
+      ) : null}
+
       <Panel title="Строительство" tight>
         {buildings.map((offer) => {
           const canBuild =
-            !offer.maxed && !offer.busy && offer.requirementsMet && offer.slotsFree && offer.affordable;
+            !offer.maxed &&
+            !offer.busy &&
+            offer.phaseOk &&
+            offer.requirementsMet &&
+            offer.slotsFree &&
+            offer.affordable;
           const reason = offer.busy
             ? 'Бригада уже занята'
             : offer.maxed
               ? 'Максимальный уровень'
-              : !offer.requirementsMet
-                ? `Сначала нужно: ${offer.requirements.join(', ')}`
-                : !offer.slotsFree
-                  ? 'Нет свободного слота — улучшите командный центр'
-                  : !offer.affordable
-                    ? 'Не хватает кредитов или материалов'
-                    : 'Начать строительство';
+              : !offer.phaseOk
+                ? (offer.phaseReason ?? 'Постройка недоступна на этой стадии')
+                : !offer.requirementsMet
+                  ? `Сначала нужно: ${offer.requirements.join(', ')}`
+                  : !offer.slotsFree
+                    ? 'Нет свободного слота — улучшите командный центр'
+                    : !offer.affordable
+                      ? 'Не хватает кредитов или материалов на складе'
+                      : 'Начать строительство';
           return (
             <div className="list-row" key={offer.type}>
               <div className="list-main">

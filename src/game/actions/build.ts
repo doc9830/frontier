@@ -2,9 +2,9 @@ import type { Amounts, BuildingType, GameState, ResourceId } from '../types.ts';
 import {
   buildingCost,
   buildingDef,
-  buildingTime,
   totalSlots,
 } from '../data/buildings.ts';
+import { phaseAllows, buildingSeconds } from '../site/site.ts';
 import { recipe, recipesForLevel } from '../data/recipes.ts';
 import { removeStorage, slotsUsed } from '../sim/station.ts';
 import { addToast } from '../sim/toast.ts';
@@ -28,6 +28,9 @@ export interface BuildingOffer {
   affordable: boolean;
   built: boolean;
   busy: boolean;
+  /** Разрешено ли на текущей стадии станции (закладка → база → развитие). */
+  phaseOk: boolean;
+  phaseReason: string | null;
 }
 
 function requirementsState(
@@ -80,19 +83,22 @@ export function buildingOffers(state: GameState): BuildingOffer[] {
     const req = requirementsState(state, type, nextLevel);
     const isNew = current === 0 && type !== 'commandCenter';
     const pending = busy?.building === type;
+    const phase = phaseAllows(state, type, nextLevel);
     return {
       type,
       name: def.name,
       level: current,
       maxed,
       cost,
-      seconds: maxed ? 0 : buildingTime(type, nextLevel),
+      seconds: maxed ? 0 : buildingSeconds(state, type, nextLevel),
       requirements: req.missing,
       requirementsMet: req.met,
       slotsFree: !isNew || used < slots,
       affordable: state.player.credits >= cost.credits && stationHas(state, cost.materials),
       built: current > 0 || pending,
       busy: pending,
+      phaseOk: phase.ok,
+      phaseReason: phase.reason,
     };
   });
 }
@@ -106,7 +112,11 @@ export function startConstruction(state: GameState, type: BuildingType): boolean
   if (!offer) return false;
   const def = buildingDef(type);
   if (offer.maxed) {
-    addToast(state, `${def.name} is already at maximum level.`, 'bad');
+    addToast(state, `«${def.name}» уже на максимальном уровне.`, 'bad');
+    return false;
+  }
+  if (!offer.phaseOk) {
+    addToast(state, offer.phaseReason ?? 'На этой стадии станции постройка недоступна.', 'bad');
     return false;
   }
   if (!offer.requirementsMet) {
@@ -114,15 +124,15 @@ export function startConstruction(state: GameState, type: BuildingType): boolean
     return false;
   }
   if (!offer.slotsFree) {
-    addToast(state, `No free building slots (${totalSlots(state.station.level)} total).`, 'bad');
+    addToast(state, `Свободных слотов построек нет (всего ${totalSlots(state.station.level)}).`, 'bad');
     return false;
   }
   if (state.player.credits < offer.cost.credits) {
-    addToast(state, `${def.name} Mk ${offer.level + 1} needs ${offer.cost.credits} cr.`, 'bad');
+    addToast(state, `Для «${def.name} Mk ${offer.level + 1}» нужно ${offer.cost.credits} кр.`, 'bad');
     return false;
   }
   if (!stationHas(state, offer.cost.materials)) {
-    addToast(state, `Not enough materials in storage for ${def.name}.`, 'bad');
+    addToast(state, `На складе не хватает материалов для «${def.name}». Привезите их кораблём.`, 'bad');
     return false;
   }
   removeStorage(state, offer.cost.materials);
@@ -133,14 +143,10 @@ export function startConstruction(state: GameState, type: BuildingType): boolean
     startedAt: state.gameTime,
     finishAt: state.gameTime + offer.seconds,
   };
-  addToast(
-    state,
-    `${def.name} Mk ${offer.level + 1} under construction — ${offer.seconds} sec.`,
-    'info',
-  );
+  addToast(state, `«${def.name} Mk ${offer.level + 1}» строится: ${offer.seconds} с.`, 'info');
   addNews(
     state,
-    `${state.station.name} started building ${def.name} Mk ${offer.level + 1}.`,
+    `${state.station.name}: начата стройка «${def.name} Mk ${offer.level + 1}».`,
     'station',
     state.station.systemId,
   );
@@ -157,6 +163,12 @@ export function cancelConstruction(state: GameState): void {
     state.station.storage[id] = (state.station.storage[id] ?? 0) + Math.round(qty * 0.6);
   }
   state.station.construction = null;
+  // Отмена самой закладки возвращает станцию в состояние «участок выбран».
+  if (state.station.phase === 'foundation' && (state.station.buildings.warehouse ?? 0) === 0) {
+    state.station.phase = 'planned';
+    addToast(state, 'Закладка отменена: станция снова на стадии выбора участка.', 'info');
+    return;
+  }
   addToast(state, 'Строительство отменено. Возвращено 60% стоимости.', 'info');
 }
 

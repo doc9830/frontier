@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { num } from './format.ts';
 
 /** Tiny UI kit: panels, meters and buttons — the whole retro chrome lives here. */
 
@@ -165,5 +166,129 @@ export function Tag({ children, color }: { children: ReactNode; color?: string }
     <span className="tag" style={color ? { color, borderColor: color } : undefined}>
       {children}
     </span>
+  );
+}
+
+/** Тонкая полоска прогресса: работа, вахта, стройка. */
+export function Progress({
+  label,
+  fraction,
+  color,
+  right,
+}: {
+  label: string;
+  /** 0..1 */
+  fraction: number;
+  color?: string;
+  right?: ReactNode;
+}) {
+  const clamped = Math.max(0, Math.min(1, fraction));
+  return (
+    <div className="progress">
+      <div className="progress-top">
+        <span>{label}</span>
+        {right ? <span className="dim">{right}</span> : null}
+      </div>
+      <div className="progress-bar">
+        <div className="progress-fill" style={{ width: `${clamped * 100}%`, background: color ?? '#41f0c1' }} />
+      </div>
+    </div>
+  );
+}
+
+/** Счётчик количества: − значение + быстрые варианты и «МАКС». */
+export function Stepper({
+  value,
+  onChange,
+  max,
+  presets = [5, 10, 25],
+  disabled,
+  suffix,
+}: {
+  value: number;
+  onChange: (value: number) => void;
+  /** Верхняя граница (трюм, запас рынка, план вахты). */
+  max: number;
+  presets?: number[];
+  disabled?: boolean;
+  suffix?: string;
+}) {
+  const limit = Math.max(1, Math.floor(max));
+  const clamp = (next: number): number => Math.max(0, Math.min(limit, Math.floor(next)));
+  return (
+    <div className="stepper">
+      <button
+        type="button"
+        className="chip"
+        disabled={disabled || value <= 0}
+        onClick={() => onChange(clamp(value - 1))}
+        aria-label="Меньше"
+      >
+        −
+      </button>
+      <span className="stepper-value">
+        {num(value)}
+        {suffix ? <span className="dim"> {suffix}</span> : null}
+      </span>
+      <button
+        type="button"
+        className="chip"
+        disabled={disabled || value >= limit}
+        onClick={() => onChange(clamp(value + 1))}
+        aria-label="Больше"
+      >
+        +
+      </button>
+      {presets
+        .filter((preset) => preset > 0 && preset <= limit && preset !== value)
+        .map((preset) => (
+          <button
+            key={preset}
+            type="button"
+            className="chip"
+            disabled={disabled}
+            onClick={() => onChange(clamp(preset))}
+          >
+            {num(preset)}
+          </button>
+        ))}
+      <button
+        type="button"
+        className="chip"
+        disabled={disabled || value >= limit}
+        title="Взять всё доступное количество"
+        onClick={() => onChange(clamp(limit))}
+      >
+        МАКС
+      </button>
+    </div>
+  );
+}
+
+export interface StepItem {
+  id: string;
+  label: string;
+  hint: string;
+  done: boolean;
+  active: boolean;
+}
+
+/** Пошаговый список задач: закладка станции, воронка развития. */
+export function Steps({ steps }: { steps: StepItem[] }) {
+  return (
+    <ol className="steps">
+      {steps.map((step, index) => (
+        <li
+          key={step.id}
+          className={step.done ? 'step done' : step.active ? 'step active' : 'step'}
+        >
+          <span className="step-mark">{step.done ? '✓' : index + 1}</span>
+          <div className="step-body">
+            <b>{step.label}</b>
+            <span className="dim">{step.hint}</span>
+          </div>
+        </li>
+      ))}
+    </ol>
   );
 }

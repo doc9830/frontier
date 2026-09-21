@@ -1536,3 +1536,115 @@ input {
     max-width: 100%;
   }
 }
+
+/* ------------------------------------------------- счётчики и прогресс */
+
+.stepper {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+
+.stepper-value {
+  min-width: 54px;
+  padding: 3px 6px;
+  border: 1px solid var(--line-soft);
+  background: #0a1a22;
+  text-align: center;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+}
+
+.progress {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.progress-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  color: var(--dim);
+}
+
+.progress-bar {
+  height: 4px;
+  background: #0a1a22;
+  border: 1px solid var(--line-soft);
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  transition: width 0.2s linear;
+}
+
+/* ------------------------------------------------------ воронка станции */
+
+.steps {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.step {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  border: 1px solid var(--line-soft);
+  padding: 5px 7px;
+  background: rgba(8, 23, 32, 0.5);
+  opacity: 0.72;
+}
+
+.step.active {
+  border-color: var(--accent);
+  background: rgba(65, 240, 193, 0.08);
+  opacity: 1;
+}
+
+.step.done {
+  opacity: 0.85;
+}
+
+.step-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  border: 1px solid var(--line-soft);
+  color: var(--dim);
+  font-size: 10px;
+}
+
+.step.done .step-mark {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.step.active .step-mark {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.step-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11px;
+}
+
+.step-body b {
+  font-size: 12px;
+  font-weight: 600;
+}
+

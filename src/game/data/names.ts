@@ -85,18 +85,3 @@ export function shipName(typeId: string, index: number): string {
           : 'КОРВЕТ';
   return `${prefix}-${String(index).padStart(2, '0')}`;
 }
-
-const PLANET_TYPES = [
-  'терранского типа',
-  'океаническая',
-  'пустынная',
-  'ледяная',
-  'газовый гигант',
-  'бесплодная',
-  'вулканическая',
-  'радиоактивная',
-];
-
-export function planetType(rng: Rng): string {
-  return rng.pick(PLANET_TYPES);
-}

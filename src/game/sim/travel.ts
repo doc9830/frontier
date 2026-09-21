@@ -1,9 +1,11 @@
 import type { GameState, Ship, StarSystem, TravelPlan } from '../types.ts';
+import { TICKS } from '../types.ts';
 import { addNews } from '../news/news.ts';
 import { addToast } from './toast.ts';
 import { hops } from '../plural.ts';
-import { shipStats } from '../ships/ship.ts';
 import { buildPayload, eventDef, scheduleTravelEvents } from '../events/events.ts';
+import { createRng } from '../rng.ts';
+import { discoveredDestinations, refreshContracts } from '../economy/contracts.ts';
 
 /**
  * Jump travel bookkeeping: fuel, per-hop progress, event schedule and arrival.
@@ -118,13 +120,34 @@ export function finishTravel(state: GameState, ship: Ship): void {
     );
   }
   if (system) {
-    for (const belt of system.belts) {
-      if (!belt.discovered && shipStats(ship).scanner >= 16) {
-        belt.discovered = true;
-        addToast(state, `Сканер нашёл пояс: ${belt.name}.`, 'good');
+    // Пояса и планеты открывает сканер. Приход в систему наносит на карту саму
+    // систему, а состав — уже задача разведки (вкладка РАЗВЕДКА).
+    if (system.scanned === true) {
+      for (const belt of system.belts) {
+        if (!belt.discovered) {
+          belt.discovered = true;
+          addToast(state, `Каталог станции: пояс ${belt.name} добавлен на карты.`, 'info');
+        }
       }
     }
+    refreshBoardOnArrival(state, system);
   }
+}
+
+/**
+ * Доска контрактов обновляется на прилёте: в списке курьеров сразу появляются
+ * маршруты в системы, которые игрок только что открыл. Ролл детерминированный,
+ * поэтому перезагрузка страницы не подсовывает новые заказы.
+ */
+function refreshBoardOnArrival(state: GameState, system: StarSystem): void {
+  if (!system.stations.some((s) => s.hasContracts)) return;
+  const day = Math.floor(state.gameTime / TICKS.secondsPerDay) + 127;
+  refreshContracts(
+    system,
+    createRng(`${state.seed}:contracts:${system.id}:arrival:${day}`),
+    day,
+    discoveredDestinations(state, system.id),
+  );
 }
 
 /** Fires the next scheduled event of the trip, pausing the ship if needed. */

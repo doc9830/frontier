@@ -11,16 +11,23 @@ import type { GameState } from '../src/game/types.ts';
 import { createGameState, playerShip } from '../src/game/state/create.ts';
 import { buildPayload, eventDef } from '../src/game/events/events.ts';
 import { travelTo } from '../src/game/actions/nav.ts';
-import { acceptContract, contractsHere } from '../src/game/actions/contracts.ts';
-import { purchaseShip, hullsForSale } from '../src/game/actions/outfitting.ts';
+import { acceptContract, contractBlockedReason, contractRoute, contractsHere } from '../src/game/actions/contracts.ts';
+import { purchaseShip, hullsForSale, shipyardHere } from '../src/game/actions/outfitting.ts';
+
 import { startMining } from '../src/game/sim/mining.ts';
 import { startConstruction } from '../src/game/actions/build.ts';
+import { cancelSurvey, startSurvey } from '../src/game/exploration/scan.ts';
+import { FOUNDATION_MATERIALS, stationPhase } from '../src/game/site/site.ts';
+import { chooseSite, foundStation } from '../src/game/actions/site.ts';
+import { planetKindOf } from '../src/game/data/planets.ts';
+import { serviceAccess } from '../src/game/data/stations.ts';
 import { GalaxyMap } from '../src/ui/GalaxyMap.tsx';
 import { EventModal } from '../src/ui/EventModal.tsx';
 import { Toaster } from '../src/ui/Toaster.tsx';
 import { IntroScreen } from '../src/ui/IntroScreen.tsx';
 import { StationPanel } from '../src/ui/panels/StationPanel.tsx';
 import { SystemPanel } from '../src/ui/panels/SystemPanel.tsx';
+import { ExplorePanel } from '../src/ui/panels/ExplorePanel.tsx';
 import { MarketPanel } from '../src/ui/panels/MarketPanel.tsx';
 import { CargoPanel } from '../src/ui/panels/CargoPanel.tsx';
 import { ShipPanel } from '../src/ui/panels/ShipPanel.tsx';
@@ -74,6 +81,7 @@ function renderShell(state: GameState, selectedId: string | null): void {
   render('StationPanel', <StationPanel state={state} run={run} />);
   render('SystemPanel', <SystemPanel state={state} run={run} />);
   render('SystemPanel (jump routed)', <SystemPanel state={state} run={run} onJump={noop} />);
+  render('ExplorePanel', <ExplorePanel state={state} run={run} />);
   render('MarketPanel', <MarketPanel state={state} run={run} />);
   render('CargoPanel', <CargoPanel state={state} run={run} />);
   render('ShipPanel', <ShipPanel state={state} run={run} />);
@@ -126,6 +134,22 @@ expect('map draws charted systems', docked.includes(state.systems[ship.systemId]
 expect('map draws its lanes', (docked.match(/<line/g) ?? []).length > 0);
 console.log(`  info charted systems: ${state.systemIds.filter((id) => state.systems[id].discovered).length}`);
 
+// рынок: количество выбирается счётчиком, поэтому проверяем оба состояния панели
+const marketSystem = state.systemIds
+  .map((id) => state.systems[id])
+  .find((sys) => sys.stations.some((st) => st.hasMarket && serviceAccess(state, st, 'market').ok));
+if (marketSystem) {
+  ship.travel = null;
+  ship.mission = null;
+  ship.status = 'docked';
+  ship.systemId = marketSystem.id;
+  const marketOpen = render('MarketPanel (open market)', <MarketPanel state={state} run={run} />, 800);
+  expect('market rows carry a quantity stepper', marketOpen.includes('stepper'));
+  expect('market rows offer the max quantity', marketOpen.includes('МАКС'));
+  expect('market names the station at work', marketOpen.includes(marketSystem.name) || marketOpen.includes('Рынок'));
+  expect('market reports free hold space', marketOpen.includes('свободно'));
+}
+
 // settings tab: pause, speed, jump animation, update card
 const settingsHtml = render(
   'SettingsPanel (paused)',
@@ -159,7 +183,8 @@ state.toast = { id: 1, text: 'Офлайн-прогон флота заверш�
 const withToast = render('Toaster (message)', <Toaster state={state} />);
 expect('toast text is rendered', withToast.includes('1 240 кр'));
 
-const buildTarget = startConstruction(state, 'warehouse');
+// Стройка проверяется в разделе [3b]: до закладки склада станция строить не даёт.
+const buildTarget = stationPhase(state) === 'planned' ? false : startConstruction(state, 'warehouse');
 console.log(`  info warehouse build started: ${buildTarget}`);
 const hull = hullsForSale(state, ship).find((offer) => offer.affordable);
 const bought = hull ? purchaseShip(state, hull.typeId) : null;
@@ -169,6 +194,70 @@ const board = contractsHere(state);
 if (board[0]) console.log(`  info contract accepted: ${acceptContract(state, board[0].id)}`);
 renderShell(state, neighbour);
 render('ShipPanel (cargo loaded)', <ShipPanel state={state} run={run} />);
+
+// Верфь и курсорские доски проверяем там, где доки и доска реально есть.
+const dockSystemId = ship.systemId;
+const yardSystem = state.systemIds
+  .map((id) => state.systems[id])
+  .find(
+    (sys) =>
+      sys.discovered &&
+      sys.stations.some((st) => st.hasShipyard && serviceAccess(state, st, 'shipyard').ok),
+  );
+if (yardSystem) {
+  ship.systemId = yardSystem.id;
+  const yardView = render('ShipPanel (at a shipyard)', <ShipPanel state={state} run={run} />);
+  const yard = shipyardHere(state, ship);
+  console.log(`  info shipyard: ${yard.label} (${yard.source})`);
+  expect('ship panel names the shipyard at work', yardView.includes('модули до Mk'), yard.label);
+  expect(
+    'ship panel splits modules into sections',
+    yardView.includes('ХОД И ПРЫЖОК') && yardView.includes('ВООРУЖЕНИЕ'),
+  );
+  expect(
+    'ship panel offers a fitting button',
+    yardView.includes('УСТАНОВИТЬ') || yardView.includes('УСТАНОВЛЕНО'),
+  );
+} else {
+  console.log('  skip no charted system with a shipyard');
+}
+
+const galaxyCouriers = state.systemIds
+  .flatMap((id) => state.systems[id].contracts)
+  .filter((contract) => contract.kind === 'courier');
+expect('galaxy boards carry courier work', galaxyCouriers.length > 0, `${galaxyCouriers.length} couriers`);
+const courierSystem = state.systemIds
+  .map((id) => state.systems[id])
+  .find(
+    (sys) =>
+      sys.discovered &&
+      sys.stations.some((st) => st.hasContracts && serviceAccess(state, st, 'contracts').ok) &&
+      sys.contracts.some((c) => c.kind === 'courier' && !contractBlockedReason(state, c)),
+  );
+if (courierSystem) {
+  ship.systemId = courierSystem.id;
+  const courierOffer = contractsHere(state).find(
+    (contract) => contract.kind === 'courier' && !contractBlockedReason(state, contract),
+  );
+  if (courierOffer) {
+    console.log(`  info courier accepted: ${acceptContract(state, courierOffer.id)}`);
+    const sealedView = render('ShipPanel (sealed cargo)', <ShipPanel state={state} run={run} />);
+    expect(
+      'sealed contract cargo is shown in the hold',
+      sealedView.includes('Опечатанный груз'),
+      `${courierOffer.amount} sealed units`,
+    );
+    const courierView = render('ContractsPanel (courier board)', <ContractsPanel state={state} run={run} />);
+    expect(
+      'courier card names the route and the distance',
+      courierView.includes('КУРЬЕР') && courierView.includes(contractRoute(state, courierOffer)),
+      contractRoute(state, courierOffer),
+    );
+  }
+} else {
+  console.log('  skip no charted board with courier work');
+}
+ship.systemId = dockSystemId;
 render('FleetPanel (two hulls)', <FleetPanel state={state} run={run} />);
 render('StationPanel (build running)', <StationPanel state={state} run={run} />);
 const cargoView = render('CargoPanel (ore in hold)', <CargoPanel state={state} run={run} />);
@@ -211,13 +300,80 @@ if (neighbour) {
   state.pendingEvent = null;
 }
 
+// --------------------------------------------------------------- station funnel
+console.log('\n[3b] station funnel: site → foundation → base');
+ship.travel = null;
+ship.mission = null;
+ship.status = 'docked';
+const claimSystem = state.systemIds
+  .map((id) => state.systems[id])
+  .find((system) => system.factionId === null);
+if (claimSystem) {
+  claimSystem.discovered = true;
+  claimSystem.scanned = true;
+  for (const claimBelt of claimSystem.belts) claimBelt.discovered = true;
+  const claimPlanet = claimSystem.planets.find((planet) => planetKindOf(planet).buildable);
+  const plannedSetup = render('StationPanel (site not chosen)', <StationPanel state={state} run={run} />);
+  expect('site panel explains the funnel', plannedSetup.includes('Закладка станции'));
+  expect('site panel lists the steps', plannedSetup.includes('step'));
+  expect('site panel says where to claim', plannedSetup.includes('ничей') || plannedSetup.includes('ничья'));
+  if (claimPlanet) {
+    console.log(`  info site chosen: ${chooseSite(state, claimSystem.id, claimPlanet.id)}`);
+    ship.systemId = claimSystem.id;
+    const chosen = render('StationPanel (site chosen)', <StationPanel state={state} run={run} />);
+    expect('chosen site is named in the panel', chosen.includes(claimSystem.name));
+    expect('foundation requirements are listed', chosen.includes('Требования закладки склада'));
+    ship.cargo = { metal: FOUNDATION_MATERIALS.metal };
+    console.log(`  info foundation: ${foundStation(state)}`);
+    const founded = render('StationPanel (foundation phase)', <StationPanel state={state} run={run} />);
+    expect('foundation phase shows the build bar', founded.includes('progress'));
+    expect('foundation phase names the warehouse', founded.includes('Склад'));
+    state.station.storage.metal = 400;
+    state.station.storage.electronics = 40;
+    // Закладка склада уже достроена (её стройка занимает бригаду).
+    state.station.construction = null;
+    state.station.buildings.warehouse = 1;
+    const buildStarted = startConstruction(state, 'commandCenter');
+    console.log(`  info base station build started: ${buildStarted}`);
+    expect('base station construction accepted', buildStarted === true);
+    const building = render('StationPanel (base station building)', <StationPanel state={state} run={run} />);
+    expect('construction progress bar renders', building.includes('progress-fill'));
+    state.station.construction = null;
+    state.station.buildings.commandCenter = 1;
+    state.station.phase = 'operational';
+    state.station.level = 1;
+    const operational = render('StationPanel (operational)', <StationPanel state={state} run={run} />);
+    expect('operational station shows the site row', operational.includes('Участок'));
+  }
+}
+
 // --------------------------------------------------------------- mining
 console.log('\n[5] mining at the belt');
 const systemHere = state.systems[ship.systemId];
 const belt = systemHere.belts.find((entry) => entry.discovered) ?? systemHere.belts[0];
 if (belt) {
+  // Разведка проверяется первой: сканер не работает на корабле, занятом добычей.
+  const freshBelt = systemHere.belts[0];
+  if (freshBelt) freshBelt.discovered = false;
+  ship.status = 'docked';
+  ship.mission = null;
+  render('ExplorePanel (survey idle)', <ExplorePanel state={state} run={run} />);
+  if (freshBelt) {
+    console.log(`  info survey started: ${startSurvey(state, 'belt', { beltId: freshBelt.id })}`);
+    const surveying = render('ExplorePanel (survey running)', <ExplorePanel state={state} run={run} />);
+    expect('explore panel shows survey progress', surveying.includes('progress-fill'));
+    expect('explore panel offers a cancel', surveying.includes('ПРЕРВАТЬ СКАН'));
+    expect('surveying blocks mining', startMining(state, ship, freshBelt.id) === false);
+    cancelSurvey(state);
+    freshBelt.discovered = true;
+    console.log(`  info survey cancelled: ${state.survey === null}`);
+  }
   console.log(`  info mining started: ${startMining(state, ship, belt.id)}`);
-  render('SystemPanel (mining)', <SystemPanel state={state} run={run} />);
+  const mining = render('SystemPanel (mining)', <SystemPanel state={state} run={run} />);
+  expect('mining panel shows the stint progress', mining.includes('progress-fill'));
+  expect('mining panel offers the stop button', mining.includes('ОСТАНОВИТЬ ДОБЫЧУ'));
+  expect('mining panel reports free cargo', mining.includes('Свободный трюм'));
+  expect('mining panel reports the belt reserve', mining.includes('Запас пояса'));
   render('ShipPanel (mining)', <ShipPanel state={state} run={run} />);
 }
 expect('event definitions stay addressable', !!eventDef('pirate_encounter'));

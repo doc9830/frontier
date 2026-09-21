@@ -1,7 +1,8 @@
-import type { Amounts, ModuleType, ResourceId } from '../types.ts';
+import type { Amounts, MakerId, ModuleLevelDef, ModuleType, ResourceId } from '../types.ts';
 import type { Ship, ShipTypeId } from '../types.ts';
 import { shipType } from '../data/ships.ts';
 import { moduleLevel } from '../data/modules.ts';
+import { equippedName, tunedLevel } from '../data/makers.ts';
 import { RESOURCES } from '../data/resources.ts';
 
 /** Ship type plus every installed module, resolved into final numbers. */
@@ -33,6 +34,20 @@ export function emptyModules(): Record<ModuleType, number> {
   };
 }
 
+export function emptyMakers(): Partial<Record<ModuleType, MakerId>> {
+  return {};
+}
+
+/** Клеймо верфи на модуле: у старых сохранений его нет — считаем стандартным. */
+export function makerOf(ship: Ship, type: ModuleType): MakerId {
+  return ship.makers?.[type] ?? 'standard';
+}
+
+/** Уровень модуля в сборке той верфи, которая его ставила. */
+export function equippedLevel(ship: Ship, type: ModuleType): ModuleLevelDef | null {
+  return tunedLevel(type, ship.modules[type], makerOf(ship, type));
+}
+
 export function shipStats(ship: Ship): ShipStats {
   const base = shipType(ship.typeId);
   let hullMax = base.hull;
@@ -48,46 +63,46 @@ export function shipStats(ship: Ship): ShipStats {
   let fuelEfficiency = 1;
   let speedMod = 0;
 
-  const engine = moduleLevel('engine', ship.modules.engine);
+  const engine = equippedLevel(ship, 'engine');
   if (engine) {
     speed += engine.effect;
     powerDraw += engine.power;
   }
 
-  const jump = moduleLevel('jumpDrive', ship.modules.jumpDrive);
+  const jump = equippedLevel(ship, 'jumpDrive');
   if (jump) {
     jumpRange += jump.effect;
     powerDraw += jump.power;
     fuelEfficiency = [1, 0.85, 0.7, 0.5][jump.level] ?? 0.5;
   }
 
-  const shield = moduleLevel('shield', ship.modules.shield);
+  const shield = equippedLevel(ship, 'shield');
   if (shield) {
     shieldMax += shield.effect;
     powerDraw += shield.power;
     speedMod += shield.speedMod ?? 0;
   }
 
-  const reactor = moduleLevel('reactor', ship.modules.reactor);
+  const reactor = equippedLevel(ship, 'reactor');
   if (reactor) {
     powerCapacity += reactor.effect;
     powerDraw += reactor.power;
   }
 
-  const cargoModule = moduleLevel('cargo', ship.modules.cargo);
+  const cargoModule = equippedLevel(ship, 'cargo');
   if (cargoModule) {
     cargo += cargoModule.effect;
     powerDraw += cargoModule.power;
     speedMod += cargoModule.speedMod ?? 0;
   }
 
-  const scannerModule = moduleLevel('scanner', ship.modules.scanner);
+  const scannerModule = equippedLevel(ship, 'scanner');
   if (scannerModule) {
     scanner += scannerModule.effect;
     powerDraw += scannerModule.power;
   }
 
-  const weapon = moduleLevel('weapon', ship.modules.weapon);
+  const weapon = equippedLevel(ship, 'weapon');
   if (weapon) {
     combat += weapon.effect;
     powerDraw += weapon.power;
@@ -120,6 +135,53 @@ export function cargoFree(ship: Ship): number {
   return Math.max(0, shipStats(ship).cargo - cargoUsed(ship));
 }
 
+/** Единицы ресурса, которые лежат в трюме под контрактной пломбой. */
+export function sealedUnits(ship: Ship, id: ResourceId): number {
+  return ship.sealed?.[id] ?? 0;
+}
+
+export function sealedTotal(ship: Ship): number {
+  let total = 0;
+  if (!ship.sealed) return 0;
+  for (const def of RESOURCES) total += ship.sealed[def.id] ?? 0;
+  return total;
+}
+
+/** Сколько единиц ресурса игрок вправе продать: опечатанный груз не его. */
+export function sellableUnits(ship: Ship, id: ResourceId): number {
+  return Math.max(0, (ship.cargo[id] ?? 0) - sealedUnits(ship, id));
+}
+
+/** Ставит пломбу фракции на груз, который уже лежит в трюме. */
+export function sealCargo(ship: Ship, id: ResourceId, qty: number): number {
+  const available = sellableUnits(ship, id);
+  const sealed = Math.min(available, Math.max(0, Math.trunc(qty)));
+  if (sealed <= 0) return 0;
+  ship.sealed = { ...(ship.sealed ?? {}) };
+  ship.sealed[id] = (ship.sealed[id] ?? 0) + sealed;
+  return sealed;
+}
+
+/** Снимает пломбу: груз снова становится обычным товаром в трюме. */
+export function releaseSealed(ship: Ship, id: ResourceId, qty: number): number {
+  const seal = sealedUnits(ship, id);
+  const released = Math.min(seal, Math.max(0, Math.trunc(qty)));
+  if (released <= 0) return 0;
+  const left = seal - released;
+  if (left <= 0) delete ship.sealed?.[id];
+  else if (ship.sealed) ship.sealed[id] = left;
+  return released;
+}
+
+/** Снимает пломбу со всего груза: используется при сдаче и отмене контракта. */
+export function releaseAllSealed(ship: Ship): void {
+  if (!ship.sealed) return;
+  for (const def of RESOURCES) {
+    if (ship.sealed[def.id]) removeCargo(ship, def.id, ship.sealed[def.id] ?? 0);
+  }
+  ship.sealed = {};
+}
+
 export function addCargo(ship: Ship, id: ResourceId, qty: number): number {
   if (qty <= 0) return 0;
   const free = cargoFree(ship);
@@ -146,9 +208,11 @@ export function removeCargo(ship: Ship, id: ResourceId, qty: number): number {
 export function powerBudgetFor(
   ship: Ship,
   changes: Partial<Record<ModuleType, number>>,
+  makerChanges: Partial<Record<ModuleType, MakerId>> = {},
 ): { capacity: number; draw: number; ok: boolean; stats: ShipStats } {
   const merged: Record<ModuleType, number> = { ...ship.modules, ...changes };
-  const stats = shipStats({ ...ship, modules: merged });
+  const makers = { ...(ship.makers ?? {}), ...makerChanges };
+  const stats = shipStats({ ...ship, modules: merged, makers });
   return {
     capacity: stats.powerCapacity,
     draw: stats.powerDraw,
@@ -157,8 +221,9 @@ export function powerBudgetFor(
   };
 }
 
-export function moduleLabel(type: ModuleType, level: number): string {
+export function moduleLabel(type: ModuleType, level: number, maker?: MakerId): string {
   if (level <= 0) return 'пусто';
+  if (maker && maker !== 'standard') return equippedName(type, level, maker);
   return moduleLevel(type, level)?.name ?? `${type} Mk ${level}`;
 }
 

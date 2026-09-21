@@ -27,10 +27,10 @@ export const BUILDINGS: BuildingDef[] = [
     name: 'Командный центр',
     short: 'КЦ',
     description:
-      'Сердце станции «Фронтир». Каждый уровень даёт слоты построек, склад, лимит флота и производственные слоты.',
+      'Базовая станция «Фронтир». Первый уровень превращает закладку в жилой узел, каждый следующий даёт слоты построек, склад, лимит флота и производственные слоты.',
     maxLevel: 10,
-    cost: { credits: 2000, materials: { metal: 120 } },
-    buildTime: 40,
+    cost: { credits: 6000, materials: { metal: 40, electronics: 4 } },
+    buildTime: 90,
     requires: [],
     effect: (l) => `${totalSlots(l)} слотов построек · флот ${fleetLimit(l, 0)}+`,
   },
@@ -40,7 +40,7 @@ export const BUILDINGS: BuildingDef[] = [
     short: 'СКЛ',
     description: 'Хранит добытую руду и купленные товары. Излишки остаются на причале и теряются.',
     maxLevel: 5,
-    cost: { credits: 600, materials: { metal: 120 } },
+    cost: { credits: 500, materials: { metal: 60 } },
     buildTime: 30,
     requires: [],
     effect: (l) => `склад ${warehouseCapacity(l)} ед.`,
@@ -51,8 +51,8 @@ export const BUILDINGS: BuildingDef[] = [
     short: 'ДОК',
     description: 'Ремонт и заправка ваших кораблей. С каждым уровнем услуги дешевле.',
     maxLevel: 3,
-    cost: { credits: 1200, materials: { metal: 200 } },
-    buildTime: 45,
+    cost: { credits: 1000, materials: { metal: 100 } },
+    buildTime: 40,
     requires: [],
     effect: (l) => `ремонт −${10 * l}% стоимости · заправка −${8 * l}% стоимости`,
   },
@@ -62,8 +62,8 @@ export const BUILDINGS: BuildingDef[] = [
     short: 'ГОРН',
     description: 'Координирует добывающие миссии и повышает их отдачу.',
     maxLevel: 3,
-    cost: { credits: 1600, materials: { metal: 240 } },
-    buildTime: 50,
+    cost: { credits: 1400, materials: { metal: 130 } },
+    buildTime: 45,
     requires: [{ building: 'dock', level: 1 }],
     effect: (l) => `+${15 * l}% к добыче · ${l} ${plural(l, 'слот', 'слота', 'слотов')} добычи`,
   },
@@ -73,8 +73,8 @@ export const BUILDINGS: BuildingDef[] = [
     short: 'ПЕРЕР',
     description: 'Превращает сырьё в товары: руду в металл, газ в топливо, редкую руду в электронику.',
     maxLevel: 3,
-    cost: { credits: 2500, materials: { metal: 300, electronics: 20 } },
-    buildTime: 60,
+    cost: { credits: 2200, materials: { metal: 160, electronics: 14 } },
+    buildTime: 55,
     requires: [{ building: 'warehouse', level: 1 }],
     effect: (l) => `${l} ${plural(l, 'слот', 'слота', 'слотов')} производства`,
   },
@@ -85,8 +85,8 @@ export const BUILDINGS: BuildingDef[] = [
     description:
       'Ставит и улучшает модули кораблей. Высокие уровни открывают оборудование Mk II и Mk III.',
     maxLevel: 3,
-    cost: { credits: 3000, materials: { metal: 320, electronics: 30 } },
-    buildTime: 70,
+    cost: { credits: 2600, materials: { metal: 180, electronics: 20 } },
+    buildTime: 60,
     requires: [{ building: 'dock', level: 1 }],
     effect: (l) => `модули до Mk ${Math.min(3, l + 1)} · ремонт дешевле на ${5 * l}%`,
   },
@@ -97,8 +97,8 @@ export const BUILDINGS: BuildingDef[] = [
     description:
       'Дальнее сканирование: открывает пояса астероидов в соседних системах и предупреждает о пиратах.',
     maxLevel: 3,
-    cost: { credits: 1800, materials: { metal: 180, electronics: 25 } },
-    buildTime: 48,
+    cost: { credits: 1500, materials: { metal: 110, electronics: 14 } },
+    buildTime: 42,
     requires: [{ building: 'warehouse', level: 1 }],
     effect: (l) =>
       `открывает ${l} ${plural(l, 'соседнюю систему', 'соседние системы', 'соседних систем')} · риск перелёта −${8 * l}%`,
@@ -109,8 +109,8 @@ export const BUILDINGS: BuildingDef[] = [
     short: 'ЛАБ',
     description: 'Небольшие постоянные улучшения за кредиты и электронику.',
     maxLevel: 3,
-    cost: { credits: 2600, materials: { metal: 220, electronics: 60 } },
-    buildTime: 65,
+    cost: { credits: 2400, materials: { metal: 140, electronics: 36 } },
+    buildTime: 58,
     requires: [{ building: 'commandCenter', level: 2 }],
     effect: (l) => `уровень исследований ${l} · добыча +${5 * l}% · торговля +${2 * l}%`,
   },
@@ -120,8 +120,8 @@ export const BUILDINGS: BuildingDef[] = [
     short: 'ФЛОТ',
     description: 'Добавляет слот флота и открывает длинные торговые маршруты для грузовиков.',
     maxLevel: 3,
-    cost: { credits: 2200, materials: { metal: 260, electronics: 20 } },
-    buildTime: 55,
+    cost: { credits: 1800, materials: { metal: 150, electronics: 12 } },
+    buildTime: 50,
     requires: [{ building: 'commandCenter', level: 2 }],
     effect: (l) => `+${l} ${plural(l, 'слот', 'слота', 'слотов')} флота · торговые маршруты`,
   },
@@ -138,6 +138,9 @@ export function buildingDef(type: BuildingType): BuildingDef {
 /**
  * Cost of one building level. Level 1 uses the base cost, higher levels scale
  * with a fixed exponent so the numbers stay readable.
+ *
+ * The exponent was lowered together with the resource rebalance: upgrading to
+ * Mk III / Mk IV should feel like a project, not like a week of grinding.
  */
 export function buildingCost(type: BuildingType, level: number): {
   credits: number;
@@ -145,11 +148,11 @@ export function buildingCost(type: BuildingType, level: number): {
 } {
   const def = buildingDef(type);
   const step = Math.max(1, level);
-  const credits = Math.round(def.cost.credits * Math.pow(step, 1.85));
+  const credits = Math.round(def.cost.credits * Math.pow(step, 1.62));
   const materials: Record<string, number> = {};
   for (const [id, amount] of Object.entries(def.cost.materials)) {
     if (typeof amount === 'number') {
-      materials[id] = Math.round(amount * Math.pow(step, 2.0));
+      materials[id] = Math.round(amount * Math.pow(step, 1.75));
     }
   }
   return { credits, materials };
@@ -157,5 +160,5 @@ export function buildingCost(type: BuildingType, level: number): {
 
 export function buildingTime(type: BuildingType, level: number): number {
   const def = buildingDef(type);
-  return Math.round(def.buildTime * Math.pow(Math.max(1, level), 1.45));
+  return Math.round(def.buildTime * Math.pow(Math.max(1, level), 1.3));
 }

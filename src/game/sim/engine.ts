@@ -2,6 +2,7 @@ import type { GameState, Ship } from '../types.ts';
 import { simulateWorld } from './world.ts';
 import { processStation } from './station.ts';
 import { processMining } from './mining.ts';
+import { processSurvey } from '../exploration/scan.ts';
 import { processFleetShip } from './fleet.ts';
 import { currentHop, finishTravel, processTravelEvents, resumeTravel, revealAround } from './travel.ts';
 import { resolveTravelEvent } from '../events/resolve.ts';
@@ -51,6 +52,7 @@ export function advance(state: GameState, seconds: number): void {
   }
 
   processStation(state);
+  processSurvey(state);
   state.lastSimulationTime = Date.now();
 }
 

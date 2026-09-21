@@ -58,6 +58,7 @@ export const STATUS_LABEL: Record<ShipStatus, string> = {
   mining: 'ДОБЫЧА',
   trading: 'ТОРГОВЫЙ РЕЙС',
   escort: 'ЭСКОРТ',
+  survey: 'СКАНИРОВАНИЕ',
 };
 
 /** Risk is stored as an enum key; the UI never shows raw English. */

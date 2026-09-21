@@ -1,22 +1,29 @@
-import type { GameState, ResourceId } from '../../game/types.ts';
+import { useEffect, useState } from 'react';
+import type { GameState, ResourceDef, ResourceId, Ship } from '../../game/types.ts';
 import { playerShip } from '../../game/state/create.ts';
 import { RESOURCES } from '../../game/data/resources.ts';
 import { availableStock, marketPrice } from '../../game/economy/market.ts';
+import { SERVICE_INFO, stationOwnerName } from '../../game/data/stations.ts';
 import { storageCapacity, storageUsed } from '../../game/sim/station.ts';
-import { cargoUsed, shipStats } from '../../game/ships/ship.ts';
+import { cargoFree, cargoUsed, shipStats } from '../../game/ships/ship.ts';
+import { siteTradeBonus } from '../../game/site/site.ts';
 import {
   atMarket,
+  atOwnStation,
   buyPriceAt,
   buyResource,
   loadFromStation,
+  marketRefusal,
+  maxBuyable,
   researchPriceBonus,
   sellEverything,
   sellPriceAt,
   sellResource,
+  serviceHere,
   unloadToStation,
 } from '../../game/actions/trade.ts';
-import { amountsText, cr, num } from '../format.ts';
-import { Btn, Hint, Panel, Row } from '../kit.tsx';
+import { amountsText, cr, num, pct } from '../format.ts';
+import { Btn, Hint, Panel, Row, Stepper, Tag } from '../kit.tsx';
 
 /** The trade screen: one row per resource, both sides of the spread visible. */
 
@@ -29,24 +36,40 @@ export function MarketPanel({
 }) {
   const ship = playerShip(state);
   if (!ship) return null;
-  const system = state.systems[ship.systemId];
   const stats = shipStats(ship);
   const open = atMarket(state);
-  const stationHere = state.station.systemId === ship.systemId;
+  const board = serviceHere(state, 'market');
+  const refusal = marketRefusal(state);
+  const stationHere = atOwnStation(state);
+  const siteBonus = siteTradeBonus(state);
   const bonus = researchPriceBonus(state);
 
   return (
-    <Panel title="Рынок" actions={<span className="dim">анализ ×{bonus.toFixed(2)}</span>}>
-      <Row label="Трюм" value={`${num(cargoUsed(ship))} / ${num(stats.cargo)}`} />
-      <Row label="Кредиты" value={cr(state.player.credits)} />
-      <Row
-        label="Склад станции"
-        value={`${num(storageUsed(state.station))} / ${num(storageCapacity(state.station))}`}
-      />
+    <Panel title="Рынок" actions={<Tag color={open ? '#41f0c1' : undefined}>{open ? 'ОТКРЫТ' : 'ЗАКРЫТ'}</Tag>}>
+      <div className="grid2 summary-grid">
+        <Row
+          label="Трюм"
+          value={`${num(cargoUsed(ship))} / ${num(stats.cargo)} (свободно ${num(cargoFree(ship))})`}
+        />
+        <Row label="Кредиты" value={cr(state.player.credits)} />
+        <Row
+          label="Склад станции"
+          value={`${num(storageUsed(state.station))} / ${num(storageCapacity(state.station))}`}
+        />
+        <Row label="Анализ рынка" value={`×${bonus.toFixed(2)} к ценам`} />
+      </div>
+      {board ? (
+        <Row
+          label="Кто торгует"
+          value={`${board.station.name} · ${stationOwnerName(state, board.station)} · ${SERVICE_INFO.market.label}`}
+        />
+      ) : null}
+      {stationHere ? <Row label="Своя станция" value={`бонус площадки ±${pct(siteBonus)} к спреду`} /> : null}
+
       {!open ? (
         <Hint>
-          В системе {system?.name ?? 'здесь'} нет рынка. Рынки есть на торговых, промышленных, добывающих и
-          научных станциях — прыгните к соседу, где у станции указан рынок.
+          {refusal ?? 'Рынок закрыт.'} Рынки есть на торговых станциях и на чёрных рынках безвластия: прыгните к
+          соседу или проверьте список услуг во вкладке СИСТЕМА.
         </Hint>
       ) : (
         <>
@@ -64,85 +87,120 @@ export function MarketPanel({
             </Btn>
           </div>
 
-
-          {RESOURCES.map((def) => {
-            const id: ResourceId = def.id;
-            const buy = buyPriceAt(state, id);
-            const sell = sellPriceAt(state, id);
-            const current = system ? marketPrice(system.market, id) : def.basePrice;
-            const drift = current / Math.max(1, def.basePrice);
-            const trend = drift > 1.08 ? '▲' : drift < 0.92 ? '▼' : '·';
-            const trendColor = drift > 1.08 ? '#7ef7b0' : drift < 0.92 ? '#ff6b6b' : '#6d8a92';
-            const stock = system ? availableStock(system.market, id) : 0;
-            const held = ship.cargo[id] ?? 0;
-            const stored = state.station.storage[id] ?? 0;
-            return (
-              <div className="list-row" key={id}>
-                <div className="list-main">
-                  <b style={{ color: def.color }}>
-                    {def.symbol} <span className="dim">{def.name}</span>
-                  </b>
-                  <span className="dim">
-                    покупка {cr(buy)} · продажа {cr(sell)}{' '}
-                    <span style={{ color: trendColor }} title={`рынок против базовой цены ${def.basePrice} кр`}>
-                      {trend}
-                    </span>
-                    <br />
-                    в продаже {num(stock)} · в трюме {num(held)} · на складе {num(stored)}
-                  </span>
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  <div className="row-actions">
-                    <Btn
-                      size="tiny"
-                      disabled={stock <= 0}
-                      title="Купить 5 единиц"
-                      onClick={() => run((draft) => buyResource(draft, id, 5))}
-                    >
-                      КУПИТЬ 5
-                    </Btn>
-                    <Btn
-                      size="tiny"
-                      disabled={stock <= 0}
-                      title="Купить столько, сколько влезет"
-                      onClick={() => run((draft) => buyResource(draft, id, stats.cargo))}
-                    >
-                      КУПИТЬ МАКС
-                    </Btn>
-                  </div>
-                  <div className="row-actions">
-                    <Btn
-                      size="tiny"
-                      kind="good"
-                      disabled={held <= 0}
-                      title="Продать весь этот товар из трюма"
-                      onClick={() => run((draft) => sellResource(draft, id, held))}
-                    >
-                      ПРОДАТЬ
-                    </Btn>
-                    <Btn
-                      size="tiny"
-                      disabled={!stationHere || stored <= 0}
-                      title={stationHere ? 'Взять со склада в трюм' : 'Только на своей станции'}
-                      onClick={() => run((draft) => loadFromStation(draft, id, stats.cargo))}
-                    >
-                      СО СКЛАДА
-                    </Btn>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
+          {RESOURCES.map((def) => (
+            <MarketRow
+              key={def.id}
+              state={state}
+              resource_={def}
+              shipId={ship.id}
+              stationHere={stationHere}
+              run={run}
+            />
+          ))}
           <Hint>
-            Цены реагируют на вашу торговлю: если вывалить полный трюм в одну систему, цена там падает. Развозите
-            продажи по разным системам, а исследование «Анализ рынка» улучшает обе стороны спреда.
+            Количество задаётся счётчиком: быстрые варианты и «МАКС» берут столько, сколько позволяют запас рынка,
+            свободный трюм и кредиты. Цены реагируют на вашу торговлю — вывалив полный трюм в одну систему, вы
+            обрушите там цену.
           </Hint>
           <Hint>
-            Склад вашей станции: {amountsText(state.station.storage)}. Перерабатывающий комплекс берёт сырьё
-            прямо оттуда, а не из трюма.
+            Склад вашей станции: {amountsText(state.station.storage)}. Переработка берёт сырьё прямо оттуда, а не из
+            трюма.
           </Hint>
         </>
       )}
     </Panel>
   );
 }
+
+/** Одна строка товара: цены, остатки и счётчик количества. */
+function MarketRow({
+  state,
+  resource_,
+  shipId,
+  stationHere,
+  run,
+}: {
+  state: GameState;
+  resource_: ResourceDef;
+  shipId: string;
+  stationHere: boolean;
+  run: (mutator: (draft: GameState) => void) => void;
+}) {
+  const ship = state.ships.find((s) => s.id === shipId) as Ship;
+  const system = state.systems[ship.systemId];
+  const id: ResourceId = resource_.id;
+  const buy = buyPriceAt(state, id);
+  const sell = sellPriceAt(state, id);
+  const current = system ? marketPrice(system.market, id) : resource_.basePrice;
+  const drift = current / Math.max(1, resource_.basePrice);
+  const trend = drift > 1.08 ? '▲' : drift < 0.92 ? '▼' : '·';
+  const trendColor = drift > 1.08 ? '#7ef7b0' : drift < 0.92 ? '#ff6b6b' : '#6d8a92';
+  const stock = system ? availableStock(system.market, id) : 0;
+  const held = ship.cargo[id] ?? 0;
+  const stored = state.station.storage[id] ?? 0;
+  const maxBuy = maxBuyable(state, id);
+  const limit = Math.max(1, maxBuy, held);
+  const [qty, setQty] = useState(() => Math.max(1, Math.min(10, limit)));
+
+  // Трюм, кредиты и запас рынка меняются каждый рейс: план подтягивается следом.
+  useEffect(() => {
+    setQty((value) => Math.max(1, Math.min(value || limit, limit)));
+  }, [limit]);
+
+  return (
+    <div className="list-row col">
+      <div className="list-main">
+        <b style={{ color: resource_.color }}>
+          {resource_.symbol} <span className="dim">{resource_.name}</span>
+        </b>
+        <span className="dim">
+          покупка {cr(buy)} · продажа {cr(sell)}{' '}
+          <span style={{ color: trendColor }} title={`рынок против базовой цены ${resource_.basePrice} кр`}>
+            {trend}
+          </span>
+          <br />
+          в продаже {num(stock)} · можно купить {num(maxBuy)} · в трюме {num(held)} · на складе {num(stored)}
+        </span>
+        <Stepper value={Math.min(qty, limit)} onChange={setQty} max={limit} presets={[5, 10, 25, 50]} suffix="ед." />
+      </div>
+      <div className="row-actions">
+        <Btn
+          size="tiny"
+          kind="primary"
+          disabled={maxBuy <= 0}
+          title={maxBuy <= 0 ? 'Нет запаса, свободного места или кредитов' : `Купить ${Math.min(qty, maxBuy)} ед.`}
+          onClick={() => run((draft) => buyResource(draft, id, qty))}
+        >
+          КУПИТЬ {num(Math.min(qty, maxBuy))}
+        </Btn>
+        <Btn
+          size="tiny"
+          kind="good"
+          disabled={held <= 0}
+          title="Продать выбранное количество из трюма"
+          onClick={() => run((draft) => sellResource(draft, id, qty))}
+        >
+          ПРОДАТЬ {num(Math.min(qty, held))}
+        </Btn>
+        <Btn
+          size="tiny"
+          kind="good"
+          disabled={held <= 0}
+          title="Продать этот товар из трюма целиком"
+          onClick={() => run((draft) => sellResource(draft, id, held))}
+        >
+          ПРОДАТЬ ВСЁ ({num(held)})
+        </Btn>
+        <Btn
+          size="tiny"
+          disabled={!stationHere || stored <= 0}
+          title={stationHere ? 'Взять со склада в трюм' : 'Только на своей станции'}
+          onClick={() => run((draft) => loadFromStation(draft, id, qty))}
+        >
+          СО СКЛАДА {num(Math.min(qty, stored))}
+        </Btn>
+      </div>
+    </div>
+  );
+}
+

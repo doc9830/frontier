@@ -5,15 +5,17 @@ import { factionView } from '../../game/factions/reputation.ts';
 import { totalSlots } from '../../game/data/buildings.ts';
 import { slotsUsed, storageCapacity, storageUsed } from '../../game/sim/station.ts';
 import { fleetCap } from '../../game/sim/fleet.ts';
-import { moduleOffers } from '../../game/actions/outfitting.ts';
+import { moduleOffers, shipyardHere } from '../../game/actions/outfitting.ts';
+import { stationPhase, chosenSite, siteCandidates } from '../../game/site/site.ts';
+import { foundationState } from '../../game/actions/site.ts';
 import { cr, newsTag, num } from '../format.ts';
 import { Btn, Hint, Panel, Row, Tag } from '../kit.tsx';
-import { UpdateCard } from '../UpdateCard.tsx';
 
 /** Feed, stats and the "what now" nudges that keep the sandbox readable. */
 
 export type TabId =
   | 'system'
+  | 'explore'
   | 'cargo'
   | 'market'
   | 'ship'
@@ -33,6 +35,8 @@ export function NewsPanel({
   const ship = playerShip(state);
   const system = ship ? state.systems[ship.systemId] : null;
   const market = system?.stations.find((station) => station.hasMarket);
+  const phase = stationPhase(state);
+  const site = chosenSite(state);
 
   // --- next steps ---------------------------------------------------------
   const nextUpgrade = ship
@@ -40,10 +44,61 @@ export function NewsPanel({
         .filter((offer) => !offer.owned && !offer.locked)
         .sort((a, b) => a.cost - b.cost)[0]
     : undefined;
+  const yard = ship ? shipyardHere(state, ship) : null;
   const storageRatio = storageUsed(state.station) / Math.max(1, storageCapacity(state.station));
   const slotsFree = totalSlots(state.station.level) - slotsUsed(state.station);
   const fleetFree = fleetCap(state) - state.ships.length;
   const suggestions: { text: string; tab: TabId; label: string }[] = [];
+
+  // Воронка станции идёт первой: пока база не введена в строй, остальные советы
+  // бессмысленны.
+  if (phase === 'planned') {
+    if (!site) {
+      const candidates = siteCandidates(state);
+      suggestions.push({
+        text: 'Участка нет: найдите ничью систему, просканируйте её и выберите планету с твёрдой корой.',
+        tab: 'station',
+        label: 'УЧАСТОК',
+      });
+      if (candidates.length === 0) {
+        suggestions.push({
+          text: 'Ничьих систем на карте не видно — расширьте карту сканером.',
+          tab: 'explore',
+          label: 'РАЗВЕДКА',
+        });
+      }
+    } else {
+      const info = foundationState(state);
+      suggestions.push({
+        text: info.ok
+          ? `Всё готово для закладки склада у ${site.planet.name}.`
+          : info.reasons[0] ?? 'Закладка пока невозможна.',
+        tab: 'station',
+        label: 'ЗАЛОЖИТЬ',
+      });
+    }
+  }
+  if (phase === 'foundation') {
+    suggestions.push({
+      text: 'Базовая станция ещё не введена в строй: привезите металл и электронику на склад и постройте КЦ Mk1.',
+      tab: 'station',
+      label: 'СТРОЙКА',
+    });
+  }
+  if (state.survey) {
+    suggestions.push({
+      text: 'Сканер работает: прогресс и прерывание — во вкладке разведки.',
+      tab: 'explore',
+      label: 'РАЗВЕДКА',
+    });
+  }
+  if (ship && ship.mission?.kind === 'mine') {
+    suggestions.push({
+      text: 'Идёт вахта в поясе: план, прогресс и остановка — во вкладке СИСТЕМА.',
+      tab: 'system',
+      label: 'ДОБЫЧА',
+    });
+  }
   if (!market)
     suggestions.push({
       text: 'Здесь нет рынка — прыгните в систему с торговой станцией.',
@@ -62,7 +117,7 @@ export function NewsPanel({
       tab: 'station',
       label: 'ПЕРЕРАБОТКА',
     });
-  if (slotsFree <= 1)
+  if (phase === 'operational' && slotsFree <= 1)
     suggestions.push({
       text: 'Остался один слот под постройку: уровень командного центра добавит ещё два.',
       tab: 'station',
@@ -82,17 +137,22 @@ export function NewsPanel({
     });
   if (nextUpgrade)
     suggestions.push({
-      text: `«${nextUpgrade.name}» — следующее улучшение (${cr(nextUpgrade.cost)}).`,
+      text: `«${nextUpgrade.name}» — следующее улучшение (${cr(nextUpgrade.cost)}) на «${yard?.label ?? 'верфи'}».`,
       tab: 'ship',
       label: 'МОДУЛИ',
+    });
+  if (ship && yard && yard.tier <= 0)
+    suggestions.push({
+      text:
+        yard.blockedReason ??
+        'Верфь ставит модули: у фракций она в узловых системах, свою можно построить на базе.',
+      tab: 'ship',
+      label: 'ВЕРФЬ',
     });
 
 
   return (
     <>
-      {/* Android shell only: hidden everywhere else in the UI. */}
-      <UpdateCard />
-
       <Panel title="Что делать дальше" tight>
         {suggestions.length === 0 ? (
           <Hint>Всё работает. Выбирайте трассу, контракт или корпус побольше.</Hint>

@@ -9,6 +9,9 @@ import {
   activeContracts,
   canDeliverContract,
   contractBlockedReason,
+  contractBoard,
+  contractRoute,
+  contractTargetName,
   contractUnitsInHold,
   contractsHere,
   deliverContract,
@@ -27,18 +30,30 @@ export function ContractsPanel({
 }) {
   const ship = playerShip(state);
   if (!ship) return null;
+  const board = contractBoard(state);
   const here = contractsHere(state);
   const active = activeContracts(state);
   const day = gameDay(state);
 
   return (
     <>
-      <Panel title="Доска контрактов" actions={<span className="dim">день {day.toFixed(2)}</span>}>
-        {here.length === 0 ? (
+      <Panel
+        title="Доска контрактов"
+        actions={
+          <div className="row-actions">
+            <span className="dim">день {day.toFixed(2)}</span>
+            <Tag color={board.available ? '#41f0c1' : undefined}>{board.stationName ?? 'нет доски'}</Tag>
+          </div>
+        }
+      >
+        {!board.available ? (
           <Hint>
-            В системе {state.systems[ship.systemId]?.name ?? 'здесь'} контрактов не предлагают. Доски обычно есть
-            на военных, промышленных и научных станциях.
+            {board.reason ??
+              'В этой системе контрактов не предлагают.'} Доски бывают на торговых, военных, промышленных и
+            научных станциях: смотрите список услуг во вкладке СИСТЕМА.
           </Hint>
+        ) : here.length === 0 ? (
+          <Hint>На доске пока пусто: заказы появляются со временем.</Hint>
         ) : (
           here.map((contract) => {
             const blocked = contractBlockedReason(state, contract);
@@ -48,15 +63,19 @@ export function ContractsPanel({
               <div className="list-row col" key={contract.id}>
                 <div className="list-main">
                   <b>
+                    {contract.kind === 'courier' ? 'КУРЬЕР · ' : 'ПОСТАВКА · '}
                     {num(contract.amount)} {resource(contract.resource).symbol} →{' '}
-                    {state.systems[contract.systemId]?.name ?? contract.systemId}
+                    {contractTargetName(state, contract)}
                   </b>
                   <span className="dim">
                     {cr(contract.reward)} · репутация +{contract.repReward} · нужна репутация {contract.minRep} ·
                     срок до дня {contract.expiresDay.toFixed(1)}
                   </span>
                   <span className="dim">
-                    {factionView(state, contract.factionId).name} · в трюме {num(inHold)}/{num(contract.amount)}
+                    {contractRoute(state, contract)} · {factionView(state, contract.factionId).name}
+                    {contract.kind === 'courier'
+                      ? ' · груз выдаётся опечатанным'
+                      : ` · в трюме ${num(inHold)}/${num(contract.amount)}`}
                   </span>
                 </div>
                 <div style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
@@ -68,7 +87,9 @@ export function ContractsPanel({
                       title={
                         deliverable
                           ? 'Передать груз'
-                          : `Летите в систему ${contract.systemId} с грузом ${contract.amount} ед. в трюме`
+                          : contract.kind === 'courier'
+                            ? `Летите в систему ${contractTargetName(state, contract)} с опечатанным грузом`
+                            : `Летите в систему ${contractTargetName(state, contract)} с грузом ${contract.amount} ед. в трюме`
                       }
                       onClick={() => run((draft) => deliverContract(draft, contract.id))}
                     >
@@ -108,11 +129,15 @@ export function ContractsPanel({
             <div className="list-row" key={contract.id}>
               <div className="list-main">
                 <b>
+                  {contract.kind === 'courier' ? 'КУРЬЕР · ' : 'ПОСТАВКА · '}
                   {num(contract.amount)} {resource(contract.resource).symbol}
                 </b>
                 <span className="dim">
-                  сдать в системе {state.systems[contract.systemId]?.name ?? contract.systemId} · в трюме{' '}
-                  {num(contractUnitsInHold(state, contract))}/{num(contract.amount)} · {cr(contract.reward)}
+                  сдать в системе {contractTargetName(state, contract)} ·{' '}
+                  {contract.kind === 'courier'
+                    ? `опечатано ${num(contract.amount)} ед.`
+                    : `в трюме ${num(contractUnitsInHold(state, contract))}/${num(contract.amount)}`}{' '}
+                  · {cr(contract.reward)}
                 </span>
               </div>
               <Btn

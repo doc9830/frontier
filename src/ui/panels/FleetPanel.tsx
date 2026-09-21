@@ -14,6 +14,7 @@ import {
   missionSlots,
 } from '../../game/sim/fleet.ts';
 import { PHASE_LABEL, STATUS_LABEL, amountsText, cr, duration, num } from '../format.ts';
+import { stationPhase } from '../../game/site/site.ts';
 import { Btn, Hint, Panel, Row, Tag } from '../kit.tsx';
 
 /** Fleet screen: mission assignment for every ship that is not the flagship. */
@@ -125,7 +126,9 @@ function FleetShipCard({
         </>
       ) : (
         <>
-
+          {stationPhase(state) === 'planned' ? (
+            <Hint>Добычные рейсы требуют склада: грузить руду некуда — сначала заложите станцию (раздел СТАНЦИЯ).</Hint>
+          ) : null}
           <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', alignItems: 'center' }}>
             <select value={mode} onChange={(event) => setMode(event.target.value as typeof mode)}>
               <option value="mine">ДОБЫЧА</option>

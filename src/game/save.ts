@@ -1,5 +1,6 @@
 import type { GameState } from './types.ts';
 import { SAVE_VERSION, createGameState } from './state/create.ts';
+import { fallbackBeltReserve } from './data/belts.ts';
 
 /**
  * Persistence. The whole world is intentionally plain serializable data, so the
@@ -23,14 +24,66 @@ function storage(): Storage | null {
   }
 }
 
+/**
+ * Дозаполняет поля, которые появились позже. Сейв v1 писался, когда станция
+ * всегда стояла в родной системе и вокруг неё не было стадий строительства,
+ * поэтому такие станции считаются действующими, а пояса получают запас.
+ * В v3 появились контракты-курьеры и клейма верфей: старые записи доски
+ * становятся контрактами-поставками, а модули — серийной сборкой.
+ */
+function migrate(state: GameState, fromVersion: number): GameState {
+  if (fromVersion < SAVE_VERSION) {
+    const station = state.station;
+    station.sitePlanetId = station.sitePlanetId ?? null;
+    station.production = Array.isArray(station.production) ? station.production : [];
+    station.research = station.research ?? { mining: 0, trade: 0, logistics: 0 };
+    station.phase =
+      station.phase ??
+      ((station.buildings?.commandCenter ?? 0) > 0 ? 'operational' : 'planned');
+    if (station.phase !== 'planned' && !station.systemId) {
+      station.systemId = state.player.homeSystemId;
+    }
+    for (const id of state.systemIds ?? Object.keys(state.systems)) {
+      const system = state.systems[id];
+      if (!system) continue;
+      system.contracts = Array.isArray(system.contracts) ? system.contracts : [];
+      for (const contract of system.contracts) {
+        contract.kind = contract.kind === 'courier' ? 'courier' : 'supply';
+        contract.targetSystemId = contract.targetSystemId ?? contract.systemId;
+        contract.hops = contract.hops ?? 0;
+        contract.distance = contract.distance ?? 0;
+        contract.cargoLoaded = contract.cargoLoaded ?? false;
+      }
+      system.scanned = system.scanned ?? (system.factionId !== null && system.discovered === true);
+      for (const belt of system.belts ?? []) {
+        if (typeof belt.reserve !== 'number') belt.reserve = fallbackBeltReserve(belt);
+      }
+      for (const systemStation of system.stations ?? []) {
+        if (typeof systemStation.hasRefuel !== 'boolean') systemStation.hasRefuel = true;
+        if (typeof systemStation.hasRepair !== 'boolean') {
+          systemStation.hasRepair = !!systemStation.hasShipyard || systemStation.type !== 'military';
+        }
+      }
+    }
+    for (const ship of state.ships ?? []) {
+      ship.makers = ship.makers ?? {};
+      ship.sealed = ship.sealed ?? {};
+    }
+  }
+  return state;
+}
+
+
 /** Older/partial blobs are patched up instead of being thrown away. */
 function normalize(state: GameState): GameState {
   state.news = Array.isArray(state.news) ? state.news : [];
   state.systemIds = state.systemIds ?? Object.keys(state.systems);
   state.factionIds = state.factionIds ?? Object.keys(state.factions ?? {});
   state.pendingEvent = state.pendingEvent ?? null;
+  state.survey = state.survey ?? null;
   state.toast = state.toast ?? null;
   state.ships = Array.isArray(state.ships) ? state.ships : [];
+  state.player.reputation = state.player.reputation ?? {};
   state.lastSimulationTime = state.lastSimulationTime || Date.now();
   return state;
 }
@@ -63,8 +116,10 @@ export function loadGame(): GameState | null {
   try {
     const parsed = JSON.parse(raw) as SaveFile;
     if (!parsed || typeof parsed !== 'object' || !parsed.state?.systems) return null;
-    if (parsed.version !== SAVE_VERSION) return null;
-    return normalize(parsed.state);
+    if (parsed.version > SAVE_VERSION) return null;
+    const state = normalize(parsed.state);
+    state.version = SAVE_VERSION;
+    return migrate(state, parsed.version ?? 1);
   } catch {
     return null;
   }
@@ -109,7 +164,9 @@ export function importSave(json: string): GameState | null {
   try {
     const parsed = JSON.parse(json) as SaveFile;
     if (!parsed?.state?.systems) return null;
-    return normalize(parsed.state);
+    const state = normalize(parsed.state);
+    state.version = SAVE_VERSION;
+    return migrate(state, parsed.version ?? 1);
   } catch {
     return null;
   }

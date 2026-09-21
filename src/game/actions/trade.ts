@@ -1,4 +1,4 @@
-import type { GameState, ResourceId, Ship } from '../types.ts';
+import type { GameState, ResourceId, Ship, SystemStation } from '../types.ts';
 import { playerShip } from '../state/create.ts';
 import { resource } from '../data/resources.ts';
 import {
@@ -9,7 +9,16 @@ import {
   playerBuyPrice,
   playerSellPrice,
 } from '../economy/market.ts';
-import { addCargo, cargoFree, cargoUsed, removeCargo, shipStats } from '../ships/ship.ts';
+import {
+  addCargo,
+  cargoFree,
+  cargoUsed,
+  removeCargo,
+  sealedTotal,
+  sealedUnits,
+  sellableUnits,
+  shipStats,
+} from '../ships/ship.ts';
 import { addStorage, removeStorage, storageFree } from '../sim/station.ts';
 import { addToast } from '../sim/toast.ts';
 import { addNews } from '../news/news.ts';
@@ -19,13 +28,53 @@ import {
   tradeReputationGain,
 } from '../factions/reputation.ts';
 import { shipType } from '../data/ships.ts';
+import type { StationService } from '../data/stations.ts';
+import { SERVICE_INFO, serviceAccess, stationServices } from '../data/stations.ts';
+import { siteTradeBonus, stationPhase } from '../site/site.ts';
+
+/** Услуга ближайшей станции системы вместе с допуском по репутации. */
+export interface ServiceHere {
+  station: SystemStation;
+  label: string;
+  ok: boolean;
+  reason: string | null;
+}
+
+/**
+ * Ищет станцию с нужной услугой в системе корабля. Возвращает null, если
+ * корабль занят (в перелёте, добыче, сканировании) или такого сервиса рядом нет.
+ */
+export function serviceHere(state: GameState, service: StationService): ServiceHere | null {
+  const ship = playerShip(state);
+  if (!ship || ship.travel || ship.status === 'mining' || ship.status === 'survey') return null;
+  const system = state.systems[ship.systemId];
+  if (!system) return null;
+  const station = system.stations.find((s) => stationServices(s)[service]);
+  if (!station) return null;
+  const access = serviceAccess(state, station, service);
+  return { station, label: SERVICE_INFO[service].label, ok: access.ok, reason: access.reason };
+}
 
 /** Docking rules: markets only answer when you are parked at their station. */
 export function atMarket(state: GameState): boolean {
+  return serviceHere(state, 'market')?.ok === true;
+}
+
+/** Станция корабля занята разведкой — блокирует любые рыночные операции. */
+export function busyReason(state: GameState): string | null {
   const ship = playerShip(state);
-  if (!ship || ship.travel || ship.status === 'mining' || ship.status === 'transit') return false;
-  const system = state.systems[ship.systemId];
-  return !!system?.stations.some((s) => s.hasMarket);
+  if (!ship) return 'Нет корабля.';
+  if (ship.travel) return 'Корабль в перелёте.';
+  if (ship.status === 'mining') return 'Корабль на добыче.';
+  if (ship.status === 'survey') return 'Корабль занят сканированием.';
+  return null;
+}
+
+/** Кошелёк торговца: своя станция в этой системе даёт бонус площадки. */
+export function atOwnStation(state: GameState): boolean {
+  const ship = playerShip(state);
+  if (!ship || !state.station.systemId) return false;
+  return ship.systemId === state.station.systemId && stationPhase(state) === 'operational';
 }
 
 /** Market Analysis research improves both sides of the spread. */
@@ -37,9 +86,11 @@ export function buyPriceAt(state: GameState, id: ResourceId): number {
   const ship = playerShip(state);
   const system = ship ? state.systems[ship.systemId] : null;
   if (!system) return 0;
+  const site = atOwnStation(state) ? 1 - siteTradeBonus(state) : 1;
   return Math.round(
-    playerBuyPrice(system.market, id, reputationOf(state, system.factionId)) /
-      researchPriceBonus(state),
+    (playerBuyPrice(system.market, id, reputationOf(state, system.factionId)) /
+      researchPriceBonus(state)) *
+      site,
   );
 }
 
@@ -47,10 +98,57 @@ export function sellPriceAt(state: GameState, id: ResourceId): number {
   const ship = playerShip(state);
   const system = ship ? state.systems[ship.systemId] : null;
   if (!system) return 0;
+  const site = atOwnStation(state) ? 1 + siteTradeBonus(state) : 1;
   return Math.round(
     playerSellPrice(system.market, id, reputationOf(state, system.factionId)) *
-      researchPriceBonus(state),
+      researchPriceBonus(state) *
+      site,
   );
+}
+
+/** Сколько единиц рынок готов продать вам прямо сейчас. */
+export function maxBuyable(state: GameState, id: ResourceId): number {
+  const ship = playerShip(state);
+  const system = ship ? state.systems[ship.systemId] : null;
+  if (!ship || !system) return 0;
+  const price = Math.max(1, buyPriceAt(state, id));
+  return Math.max(
+    0,
+    Math.min(availableStock(system.market, id), cargoFree(ship), Math.floor(state.player.credits / price)),
+  );
+}
+
+/** Сколько единиц вы можете продать с трюма и со склада. */
+export function maxSellable(state: GameState, id: ResourceId, fromStorage = false): number {
+  const ship = playerShip(state);
+  if (!ship) return 0;
+  // Опечатанный контрактный груз продаже не подлежит.
+  const inHold = sellableUnits(ship, id);
+  if (!fromStorage) return inHold;
+  return inHold + (state.station.storage[id] ?? 0);
+}
+
+/** Доступ к рынку конкретной системы (для торговых маршрутов флота). */
+export function marketAccessInSystem(
+  state: GameState,
+  systemId: string,
+): { ok: boolean; reason: string | null } {
+  const system = state.systems[systemId];
+  if (!system) return { ok: false, reason: 'Система не найдена.' };
+  const station = system.stations.find((s) => stationServices(s).market);
+  if (!station) return { ok: false, reason: `${system.name}: станции с рынком нет.` };
+  const access = serviceAccess(state, station, 'market');
+  return { ok: access.ok, reason: access.reason };
+}
+
+/** Причина, по которой рынок сейчас не отвечает (или null, если всё открыто). */
+export function marketRefusal(state: GameState): string | null {
+  const busy = busyReason(state);
+  if (busy) return busy;
+  const service = serviceHere(state, 'market');
+  if (!service) return 'В этой системе нет рынка: прыгните туда, где у станции указан рынок.';
+  if (!service.ok) return service.reason;
+  return null;
 }
 
 export function buyResource(state: GameState, id: ResourceId, qty: number): number {
@@ -58,23 +156,13 @@ export function buyResource(state: GameState, id: ResourceId, qty: number): numb
   if (!ship) return 0;
   const system = state.systems[ship.systemId];
   if (!system) return 0;
-  if (!atMarket(state)) {
-    addToast(state, 'Здесь нет рынка. Пристыкуйтесь к торговой станции.', 'bad');
+  const refusal = marketRefusal(state);
+  if (refusal) {
+    addToast(state, refusal, 'bad');
     return 0;
   }
-  const price = Math.round(
-    playerBuyPrice(system.market, id, reputationOf(state, system.factionId)) /
-      researchPriceBonus(state),
-  );
-  const units = Math.max(
-    0,
-    Math.min(
-      Math.floor(qty),
-      availableStock(system.market, id),
-      cargoFree(ship),
-      Math.floor(state.player.credits / Math.max(1, price)),
-    ),
-  );
+  const price = Math.max(1, buyPriceAt(state, id));
+  const units = Math.max(0, Math.min(Math.floor(qty), maxBuyable(state, id)));
   if (units <= 0) {
     addToast(state, 'Купить не получится: нет запаса, места или кредитов.', 'bad');
     return 0;
@@ -97,17 +185,22 @@ export function sellResource(state: GameState, id: ResourceId, qty: number): num
   if (!ship) return 0;
   const system = state.systems[ship.systemId];
   if (!system) return 0;
-  if (!atMarket(state)) {
-    addToast(state, 'Здесь нет рынка. Пристыкуйтесь к торговой станции.', 'bad');
+  const refusal = marketRefusal(state);
+  if (refusal) {
+    addToast(state, refusal, 'bad');
     return 0;
   }
-  const price = Math.round(
-    playerSellPrice(system.market, id, reputationOf(state, system.factionId)) *
-      researchPriceBonus(state),
-  );
-  const units = Math.min(Math.floor(qty), ship.cargo[id] ?? 0);
+  const price = Math.max(1, sellPriceAt(state, id));
+  const seal = sealedUnits(ship, id);
+  const units = Math.min(Math.floor(qty), sellableUnits(ship, id));
   if (units <= 0) {
-    addToast(state, `В трюме нет «${resource(id).name}».`, 'bad');
+    addToast(
+      state,
+      seal > 0
+        ? `«${resource(id).name}» лежит под пломбой контракта: продать нельзя, пока груз не сдан.`
+        : `В трюме нет «${resource(id).name}».`,
+      'bad',
+    );
     return 0;
   }
   removeCargo(ship, id, units);
@@ -135,8 +228,9 @@ export function sellStoredResource(state: GameState, id: ResourceId, qty: number
   if (!ship) return 0;
   const system = state.systems[ship.systemId];
   if (!system) return 0;
-  if (!atMarket(state)) {
-    addToast(state, 'Здесь нет рынка. Пристыкуйтесь к торговой станции.', 'bad');
+  const refusal = marketRefusal(state);
+  if (refusal) {
+    addToast(state, refusal, 'bad');
     return 0;
   }
   if (state.station.systemId !== ship.systemId) {
@@ -149,10 +243,7 @@ export function sellStoredResource(state: GameState, id: ResourceId, qty: number
     addToast(state, `На складе нет «${resource(id).name}».`, 'bad');
     return 0;
   }
-  const price = Math.round(
-    playerSellPrice(system.market, id, reputationOf(state, system.factionId)) *
-      researchPriceBonus(state),
-  );
+  const price = Math.max(1, sellPriceAt(state, id));
   removeStorage(state, { [id]: units });
   applySell(system.market, id, units);
   const revenue = units * price;
@@ -187,17 +278,25 @@ export function unloadToStation(state: GameState, id: ResourceId | null): number
     addToast(state, 'Разгрузить можно только на своей станции.', 'bad');
     return 0;
   }
+  if (stationPhase(state) === 'planned') {
+    addToast(state, 'Сначала заложите склад на выбранной планете: хранить груз пока негде.', 'bad');
+    return 0;
+  }
   const ids = id ? [id] : (Object.keys(ship.cargo) as ResourceId[]);
   let moved = 0;
   let lost = 0;
   for (const key of ids) {
-    const units = removeCargo(ship, key, ship.cargo[key] ?? 0);
+    const units = removeCargo(ship, key, sellableUnits(ship, key));
     if (units <= 0) continue;
     const result = addStorage(state, { [key]: units });
     moved += result.added;
     lost += result.lost;
   }
   if (lost > 0) addToast(state, `Склад переполнен: потеряно ${lost} ед.`, 'bad');
+  const sealedLeft = sealedTotal(ship);
+  if (sealedLeft > 0) {
+    addToast(state, `Опечатанный груз (${sealedLeft} ед.) остаётся в трюме: его сдают по контракту.`, 'info');
+  }
   if (moved > 0) addToast(state, `Разгружено ${moved} ед. на склад «${state.station.name}».`, 'good');
   return moved;
 }
@@ -208,6 +307,10 @@ export function loadFromStation(state: GameState, id: ResourceId, qty: number): 
   if (!ship) return 0;
   if (ship.systemId !== state.station.systemId) {
     addToast(state, 'Загрузить груз можно только на своей станции.', 'bad');
+    return 0;
+  }
+  if (stationPhase(state) === 'planned') {
+    addToast(state, 'На участке ещё нет склада: грузить нечего.', 'bad');
     return 0;
   }
   const units = Math.min(Math.floor(qty), state.station.storage[id] ?? 0, cargoFree(ship));
@@ -250,6 +353,11 @@ export function repairCost(state: GameState, ship: Ship): number {
 }
 
 export function refuelShip(state: GameState, ship: Ship, topUp = 40): number {
+  const service = serviceHere(state, 'refuel');
+  if (!service || !service.ok) {
+    addToast(state, service?.reason ?? 'Здесь негде заправиться: нужна станция с услугой заправки.', 'bad');
+    return 0;
+  }
   const stats = shipStats(ship);
   const full = stats.fuelMax - ship.fuel <= topUp;
   const cost = Math.ceil(refuelCost(state, ship) * (full ? 1 : topUp / Math.max(1, stats.fuelMax - ship.fuel)));
@@ -258,7 +366,7 @@ export function refuelShip(state: GameState, ship: Ship, topUp = 40): number {
     return 0;
   }
   if (state.player.credits < cost) {
-    addToast(state, `Refuelling costs ${cost} cr, you have ${state.player.credits}.`, 'bad');
+    addToast(state, `Заправка стоит ${cost} кр, у вас ${state.player.credits}.`, 'bad');
     return 0;
   }
   state.player.credits -= cost;
@@ -268,13 +376,18 @@ export function refuelShip(state: GameState, ship: Ship, topUp = 40): number {
 }
 
 export function repairShip(state: GameState, ship: Ship): number {
+  const service = serviceHere(state, 'repair');
+  if (!service || !service.ok) {
+    addToast(state, service?.reason ?? 'Здесь нет ремонтной службы.', 'bad');
+    return 0;
+  }
   const cost = repairCost(state, ship);
   if (cost <= 0) {
     addToast(state, `${ship.name} не нуждается в ремонте.`, 'info');
     return 0;
   }
   if (state.player.credits < cost) {
-    addToast(state, `Repairs cost ${cost} cr, you have ${state.player.credits}.`, 'bad');
+    addToast(state, `Ремонт стоит ${cost} кр, у вас ${state.player.credits}.`, 'bad');
     return 0;
   }
   state.player.credits -= cost;

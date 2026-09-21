@@ -12,7 +12,9 @@ import { MINEABLE, resourceSymbol } from '../data/resources.ts';
 
 const BASE_STORAGE = 120;
 
+/** Склад появляется только вместе с закладкой: до неё хранить нечего и негде. */
 export function storageCapacity(station: PlayerStation): number {
+  if ((station.phase ?? 'operational') === 'planned') return 0;
   return BASE_STORAGE + warehouseCapacity(station.buildings.warehouse ?? 0);
 }
 
@@ -93,6 +95,21 @@ export function processStation(state: GameState): void {
       station.systemId,
       state.systems[station.systemId]?.factionId ?? null,
     );
+    // Базовая станция: закладка превращается в действующий узел, включая бонус
+    // площадки. До этого уровня станция считается стройплощадкой.
+    if (job.building === 'commandCenter' && station.phase === 'foundation') {
+      station.phase = 'operational';
+      const site = station.sitePlanetId
+        ? state.systems[station.systemId]?.planets.find((p) => p.id === station.sitePlanetId)
+        : null;
+      addToast(state, `${station.name} введена в строй. Бонус площадки активен.`, 'good');
+      addNews(
+        state,
+        `${station.name} начала работу${site ? ` у ${site.name}` : ''}: доки, склад и переработка приносят профильный бонус планеты.`,
+        'station',
+        station.systemId,
+      );
+    }
   }
 
   for (let i = station.production.length - 1; i >= 0; i -= 1) {

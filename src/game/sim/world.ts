@@ -3,7 +3,8 @@ import { TICKS } from '../types.ts';
 import { RESOURCES } from '../data/resources.ts';
 import { clamp, simulateMarket } from '../economy/market.ts';
 import { createRng, runtimeRng } from '../rng.ts';
-import { refreshContracts } from '../economy/contracts.ts';
+import { discoveredDestinations, refreshContracts } from '../economy/contracts.ts';
+import { expireAcceptedContracts } from '../actions/contracts.ts';
 import { addNews } from '../news/news.ts';
 import { addToast } from './toast.ts';
 import { factionView } from '../factions/reputation.ts';
@@ -27,7 +28,10 @@ export function simulateWorld(state: GameState, seconds: number, previousTime: n
 
   const previousDay = Math.floor(previousTime / TICKS.secondsPerDay);
   const currentDay = Math.floor(state.gameTime / TICKS.secondsPerDay);
-  if (currentDay > previousDay) refreshContractBoards(state, currentDay);
+  if (currentDay > previousDay) {
+    expireAcceptedContracts(state, Math.floor(currentDay + 127));
+    refreshContractBoards(state, currentDay);
+  }
 
   if (state.gameTime >= state.nextWorldEventAt) fireWorldEvent(state);
 }
@@ -37,7 +41,12 @@ function refreshContractBoards(state: GameState, day: number): void {
   for (const id of state.systemIds) {
     const system = state.systems[id];
     if (!system?.stations.some((s) => s.hasContracts)) continue;
-    refreshContracts(system, createRng(`${state.seed}:contracts:${id}:${absoluteDay}`), absoluteDay);
+    refreshContracts(
+      system,
+      createRng(`${state.seed}:contracts:${id}:${absoluteDay}`),
+      absoluteDay,
+      discoveredDestinations(state, id),
+    );
   }
 }
 
