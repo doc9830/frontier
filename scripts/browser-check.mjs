@@ -135,6 +135,34 @@ async function newTab(targetUrl) {
 const ws = await newTab('about:blank');
 const mainTargetId = lastTargetId;
 
+const clickButton = (label) =>
+  evaluate(`
+    (() => {
+      const button = [...document.querySelectorAll('.panelcol button')]
+        .find((b) => b.textContent.trim().startsWith(${JSON.stringify(label)}));
+      if (!button) return 'missing';
+      if (button.disabled) return 'disabled';
+      button.click();
+      return 'clicked';
+    })()
+  `);
+
+const clickBack = () =>
+  evaluate(`
+    (() => {
+      const button = document.querySelector('.panelcol .sheet-back');
+      if (!button) return false;
+      button.click();
+      return true;
+    })()
+  `);
+
+/** Заголовок листа без учёта CSS-видимости: на десктопе шапка скрыта. */
+const sheetHeading = () =>
+  evaluate("document.querySelector('.panelcol .sheet-title')?.textContent?.trim() ?? ''");
+
+const panelText = () => evaluate("document.querySelector('.panelcol')?.innerText ?? ''");
+
 const clickTab = (label) =>
   evaluate(`
     (() => {
@@ -172,11 +200,11 @@ await sleep(1500);
 
 const shell = await evaluate('document.body.innerText');
 check('shell replaced the intro', !shell.includes('НОВАЯ ГАЛАКТИКА'));
-check('dock is on screen', shell.includes('СИСТЕМА') && shell.includes('РЫНОК'));
+check('dock is on screen', shell.includes('СИСТЕМА') && shell.includes('ГРУЗ') && shell.includes('НАСТРОЙКИ'));
 check('credits are shown', /кр/.test(shell));
 check('save was written', await evaluate("localStorage.getItem('frontier.save.v1') !== null"));
 
-const tabs = ['РАЗВЕДКА', 'ГРУЗ', 'РЫНОК', 'КОРАБЛЬ', 'СТАНЦИЯ', 'ФЛОТ', 'КОНТРАКТЫ', 'ЛЕНТА', 'НАСТРОЙКИ'];
+const tabs = ['СИСТЕМА', 'ГРУЗ', 'КОРАБЛЬ', 'ФЛОТ', 'ЛЕНТА', 'НАСТРОЙКИ'];
 console.log('\n[3] every tab renders');
 for (const tab of tabs) {
   const clicked = await clickTab(tab);
@@ -185,58 +213,110 @@ for (const tab of tabs) {
   check(`${tab} opens with content`, clicked === true && panelText.length > 40, `${panelText.length} chars`);
 }
 
-// Верфь и доска контрактов: подписи о том, чьи доки ставят модули и куда везти груз.
-console.log('\n[3b] outfitting and contract boards tell who is who');
+// Подэкраны: из раздела «Корабль» открывается верфь, из «Груза» — рынок и склад.
+console.log('\n[3b] subscreens open from their tabs and come back');
 await clickTab('КОРАБЛЬ');
 await sleep(300);
-const shipText = await evaluate("document.querySelector('.panelcol')?.innerText ?? ''");
-check(
-  'ship tab groups modules into sections',
-  shipText.includes('ХОД И ПРЫЖОК') && shipText.includes('ВООРУЖЕНИЕ'),
-  shipText.slice(0, 90),
-);
-check(
-  'ship tab names the shipyard at work',
-  shipText.includes('Верфь') && (shipText.includes('модули до Mk') || shipText.includes('верфи')),
-);
-await clickTab('КОНТРАКТЫ');
-await sleep(300);
-const contractText = await evaluate("document.querySelector('.panelcol')?.innerText ?? ''");
-check(
-  'contract tab labels the kind of work',
-  contractText.includes('ПОСТАВКА') || contractText.includes('КУРЬЕР'),
-  contractText.slice(0, 120),
-);
+const shipText = await panelText();
+const shipLower = shipText.toLowerCase();
+check('ship tab shows the flagship summary', shipLower.includes('сборка корабля'), shipText.slice(0, 90));
+const yardTile = await clickButton('ВЕРФЬ');
+if (yardTile === 'clicked') {
+  await sleep(250);
+  const yardText = (await panelText()).toLowerCase();
+  check('shipyard screen opens inside the tab', yardText.includes('верфь'), yardText.slice(0, 90));
+  check(
+    'shipyard either lists modules or explains itself',
+    yardText.includes('ход и прыжок') || yardText.includes('недоступна') || yardText.includes('нет верфи'),
+  );
+  const backed = await clickBack();
+  await sleep(250);
+  const backText = await panelText();
+  check('back returns to the ship section', backed === true && backText.toLowerCase().includes('сборка корабля'));
+} else {
+  check('shipyard tile exists on the ship tab', false, yardTile);
+}
 
-// Телефонный путь: нижний док открывает те же разделы.
-const dockWorks = await evaluate(`
-  (() => {
-    const dock = [...document.querySelectorAll('.dock .dock-btn')];
-    if (dock.length === 0) return 'no dock';
-    dock[0].click();
-    return document.querySelector('.panelcol')?.innerText?.slice(0, 40) ?? '';
-  })()
-`);
-check('bottom dock opens a section', typeof dockWorks === 'string' && dockWorks.length > 0, dockWorks);
+await clickTab('ГРУЗ');
+await sleep(300);
+const cargoText = (await panelText()).toLowerCase();
+check('cargo tab lists the hold', cargoText.includes('в трюме'), cargoText.slice(0, 90));
+const depotTile = await clickButton('СКЛАД');
+if (depotTile === 'clicked') {
+  await sleep(250);
+  const depotText = (await panelText()).toLowerCase();
+  check('depot screen explains where the goods live', depotText.includes('склад'), depotText.slice(0, 90));
+  await clickBack();
+  await sleep(200);
+} else {
+  check('depot tile is offered (station must be nearby)', depotTile === 'disabled', depotTile);
+}
+
+await clickTab('СИСТЕМА');
+await sleep(300);
+const stationsTile = await clickButton('СТАНЦИИ');
+check('system tab offers the station list', stationsTile === 'clicked', stationsTile);
+await sleep(250);
+const stationMenuText = (await panelText()).toLowerCase();
+check(
+  'station menu is reachable',
+  stationMenuText.includes('услуг') || stationMenuText.includes('склад'),
+  stationMenuText.slice(0, 120),
+);
+const contractTile = await clickButton('КОНТРАКТЫ');
+if (contractTile === 'clicked') {
+  await sleep(250);
+  const contractText = (await panelText()).toLowerCase();
+  check(
+    'contract screen labels the kind of work',
+    contractText.includes('поставка') || contractText.includes('курьер') || contractText.includes('доска'),
+    contractText.slice(0, 120),
+  );
+  await clickBack();
+  await sleep(200);
+} else {
+  console.log('  skip no contract board in the starting system');
+}
 
 console.log('\n[4] station funnel is reachable');
-await clickTab('СТАНЦИЯ');
+await clickTab('СИСТЕМА');
 await sleep(300);
-const stationText = (await evaluate("document.querySelector('.panelcol')?.innerText ?? ''")).toLowerCase();
-check('station tab shows the claim funnel', stationText.includes('закладка станции'), stationText.slice(0, 120));
-check('funnel lists the steps', stationText.includes('выбрать участок'));
+const funnelOpen = await clickButton('СТРОИТЕЛЬСТВО СТАНЦИИ');
+check('the claim funnel opens from the system tab', funnelOpen === 'clicked', funnelOpen);
+await sleep(350);
+const funnelText = (await panelText()).toLowerCase();
+check('funnel shows the claim steps', funnelText.includes('закладка станции'), funnelText.slice(0, 120));
+check('funnel lists the steps', funnelText.includes('выбрать участок'));
 check(
   'funnel asks for a haul',
-  stationText.includes('заложить склад') || stationText.includes('требования закладки'),
+  funnelText.includes('заложить склад') || funnelText.includes('требования закладки'),
+);
+const funnelBack = await clickBack();
+await sleep(250);
+check(
+  'back leaves the funnel',
+  funnelBack === true && (await panelText()).toLowerCase().includes('система ·'),
 );
 
 console.log('\n[5] mining controls');
 await clickTab('СИСТЕМА');
+await sleep(250);
+const hubText = await panelText();
+check('system hub offers research', hubText.includes('ИССЛЕДОВАНИЕ'), hubText.slice(0, 90));
+const resourcesOpen = await clickButton('РЕСУРСЫ');
+check('resources screen opens from the hub', resourcesOpen === 'clicked', resourcesOpen);
 await sleep(300);
-const systemText = (await evaluate("document.querySelector('.panelcol')?.innerText ?? ''")).toLowerCase();
-check('system tab lists belts', systemText.includes('пояса астероидов'));
-check('belt rows show the reserve', systemText.includes('запас'), systemText.slice(0, 120));
-check('mining controls are offered', systemText.includes('бурить') || systemText.includes('до полного трюма'));
+const systemText = (await panelText()).toLowerCase();
+check('resources screen lists belts', systemText.includes('пояса'), systemText.slice(0, 120));
+check(
+  'belt rows show the reserve or ask for a scan',
+  systemText.includes('запас') || systemText.includes('не изучен'),
+  systemText.slice(0, 120),
+);
+check(
+  'mining controls are offered',
+  systemText.includes('бурить') || systemText.includes('до полного трюма') || systemText.includes('исследовать'),
+);
 
 console.log('\n[6] live mining stint');
 await clickTab('НАСТРОЙКИ');
@@ -249,22 +329,30 @@ await evaluate(`
   })()
 `);
 await clickTab('СИСТЕМА');
-await sleep(200);
-const drillStart = await evaluate(`
-  (() => {
-    const button = [...document.querySelectorAll('button')].find((b) => b.textContent.trim().startsWith('БУРИТЬ'));
-    if (!button) return 'no belt to drill';
-    if (button.disabled) return 'button disabled';
-    button.click();
-    return 'clicked';
-  })()
-`);
-check('a belt can be drilled from the panel', drillStart === 'clicked', drillStart);
-await sleep(3500);
-const miningText = (await evaluate("document.querySelector('.panelcol')?.innerText ?? ''")).toLowerCase();
-check('stint panel is live', miningText.includes('вахта'), miningText.slice(0, 100));
-check('stint reports a plan', miningText.includes('план вахты'));
-check('stint can be stopped', miningText.includes('остановить добычу'));
+await sleep(250);
+const resourcesAgain = await clickButton('РЕСУРСЫ');
+check('resources screen is one tap away', resourcesAgain === 'clicked', resourcesAgain);
+await sleep(300);
+const drillStart = await clickButton('БУРИТЬ');
+if (drillStart === 'clicked') {
+  check('a belt can be drilled from the resources screen', true);
+  await sleep(3500);
+  const miningText = (await panelText()).toLowerCase();
+  check('stint panel is live', miningText.includes('вахта'), miningText.slice(0, 100));
+  check('stint reports a plan', miningText.includes('план вахты'));
+  check('stint can be stopped', miningText.includes('остановить добычу'));
+} else {
+  check('undiscovered belts refuse drilling', drillStart === 'missing' || drillStart === 'disabled', drillStart);
+  const research = await clickButton('ИССЛЕДОВАТЬ');
+  check('research opens for un-scanned belts', research === 'clicked', research);
+  await sleep(300);
+  const researchText = (await panelText()).toLowerCase();
+  check(
+    'research screen offers a belt scan',
+    researchText.includes('пояса') || researchText.includes('начать скан'),
+    researchText.slice(0, 120),
+  );
+}
 
 console.log('\n[7] claim a station through the UI');
 const prepared = execFileSync(
@@ -292,9 +380,12 @@ const resume = await evaluate(`
 `);
 check('saved game can be resumed', resume === true);
 await sleep(1200);
-await clickTab('СТАНЦИЯ');
+await clickTab('СИСТЕМА');
+await sleep(350);
+const preparedFunnel = await clickButton('СТРОИТЕЛЬСТВО СТАНЦИИ');
+check('prepared game keeps the funnel reachable', preparedFunnel === 'clicked', preparedFunnel);
 await sleep(400);
-const beforeText = (await evaluate("document.querySelector('.panelcol')?.innerText ?? ''")).toLowerCase();
+const beforeText = (await panelText()).toLowerCase();
 check('prepared site is shown', beforeText.includes('заложить склад'), beforeText.slice(0, 120));
 const creditsBefore = await evaluate(`
   (() => {
@@ -314,8 +405,18 @@ const founded = await evaluate(`
 check('foundation button is live', founded === 'clicked', founded);
 await sleep(600);
 const afterText = (await evaluate("document.querySelector('.panelcol')?.innerText ?? ''")).toLowerCase();
-check('station moved to the foundation phase', afterText.includes('заложен склад'), afterText.slice(0, 120));
-check('construction bar started', afterText.includes('склад mk 1') || afterText.includes('progress'));
+check('station moved to the foundation phase', afterText.includes('стройплощадка'), afterText.slice(0, 160));
+await clickTab('СИСТЕМА');
+await sleep(300);
+const baseOpen = await clickButton('УПРАВЛЕНИЕ БАЗОЙ');
+check('base screen opens after founding', baseOpen === 'clicked', baseOpen);
+await sleep(400);
+const baseText = (await panelText()).toLowerCase();
+check(
+  'construction bar started',
+  baseText.includes('строится') || baseText.includes('progress'),
+  baseText.slice(0, 120),
+);
 const creditsAfter = await evaluate(`
   (() => {
     const text = document.body.innerText.match(/([\\d\\s]+) кр/);
@@ -328,6 +429,67 @@ check('player got feedback', toastText.includes('склад') || afterText.inclu
 
 console.log('\n[8] console health');
 check('no uncaught exceptions', consoleErrors.length === 0, consoleErrors.slice(0, 3).join(' | '));
+
+// Телефонная раскладка: лист не накрывает док, «назад» всегда под рукой.
+console.log('\n[9] phone layout and back stack');
+await send('Emulation.setDeviceMetricsOverride', {
+  width: 390,
+  height: 844,
+  deviceScaleFactor: 2,
+  mobile: true,
+});
+await sleep(500);
+await clickTab('СИСТЕМА');
+await sleep(400);
+const layout = await evaluate(`
+  (() => {
+    const sheet = document.querySelector('.panelcol');
+    const dock = document.querySelector('.dock');
+    const sheetRect = sheet?.getBoundingClientRect();
+    const dockRect = dock?.getBoundingClientRect();
+    return {
+      open: !!sheet?.classList.contains('open'),
+      sheetBottom: Math.round(sheetRect?.bottom ?? -1),
+      dockTop: Math.round(dockRect?.top ?? -1),
+      dockHeight: Math.round(dockRect?.height ?? -1),
+    };
+  })()
+`);
+check('sheet is open on the phone', layout.open === true, JSON.stringify(layout));
+check(
+  'sheet stops above the dock',
+  layout.dockTop > 0 && layout.sheetBottom <= layout.dockTop + 1,
+  JSON.stringify(layout),
+);
+const phoneTile = await clickButton('СТАНЦИИ');
+check('subscreen opens with the dock still on screen', phoneTile === 'clicked', phoneTile);
+await sleep(400);
+const hiddenTabs = await evaluate(
+  "(() => { const t = document.querySelector('.panelcol .tabs'); return !!t && getComputedStyle(t).display === 'none'; })()",
+);
+check('tab strip hides in a subscreen (dock replaces it)', hiddenTabs === true);
+const backVisible = await evaluate(`
+  (() => {
+    const button = document.querySelector('.sheet-back');
+    if (!button) return false;
+    const rect = button.getBoundingClientRect();
+    return getComputedStyle(button).display !== 'none' && rect.width > 0 && rect.height > 0;
+  })()
+`);
+check('back button is tappable in a subscreen', backVisible === true);
+const escapeBack = await evaluate(`
+  (() => {
+    const before = document.querySelector('.panelcol .sheet-back') !== null;
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    return before;
+  })()
+`);
+await sleep(300);
+const afterEscape = await evaluate("document.querySelector('.panelcol .sheet-back') === null");
+check('Escape pops the subscreen too', escapeBack === true && afterEscape === true);
+const bridge = await evaluate("typeof window.__frontierBack");
+check('browser build leaves the hardware back to the shell', bridge === 'undefined', bridge);
+await send('Emulation.clearDeviceMetricsOverride');
 
 freshTab.close();
 ws.close();

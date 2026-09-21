@@ -3,7 +3,6 @@ import { playerShip } from '../../game/state/create.ts';
 import { shipStats } from '../../game/ships/ship.ts';
 import { resource } from '../../game/data/resources.ts';
 import { beltReserve, beltWear, MIN_BELT_RESERVE } from '../../game/data/belts.ts';
-import { planetKindOf, PLANET_BONUS_LABEL } from '../../game/data/planets.ts';
 import {
   SURVEY_INFO,
   cancelSurvey,
@@ -16,20 +15,27 @@ import {
   surveyStatus,
 } from '../../game/exploration/scan.ts';
 import { stationPhase } from '../../game/site/site.ts';
-import { duration, num, pct } from '../format.ts';
+import { duration, num } from '../format.ts';
 import { Btn, Hint, Panel, Progress, Row, Tag } from '../kit.tsx';
+import type { Screen } from '../nav.ts';
 
 /**
- * Разведка. Отдельная вкладка, потому что скан — вход во всю остальную игру:
- * без поясов нет добычи, без планет нет участка под собственную станцию.
+ * Подэкран «Исследование»: полный скан системы, разведка поясов и дальний скан.
+ *
+ * Скан — вход во всю остальную игру: без изученных поясов нет добычи, без
+ * полного скана системы нет планет и участка под собственную станцию. Поэтому
+ * подэкран живёт в разделе «Система» первой кнопкой.
  */
 
-export function ExplorePanel({
+export function ResearchPanel({
   state,
   run,
+  onOpen,
 }: {
   state: GameState;
   run: (mutator: (draft: GameState) => void) => void;
+  /** Переход к добыче после скана пояса. */
+  onOpen: (screen: Screen) => void;
 }) {
   const ship = playerShip(state);
   if (!ship) return null;
@@ -43,15 +49,15 @@ export function ExplorePanel({
       ? 'бонус площадки работает'
       : 'бонус площадки включится после КЦ Mk1';
   const seconds = (kind: SurveyKind): number => surveySeconds(state, ship, kind);
+  const scanned = system.belts.filter((belt) => belt.discovered).length;
+
 
   return (
     <>
       <Panel
-        title={`Разведка · ${system.name}`}
+        title={`Исследование · ${system.name}`}
         actions={
-          <Tag color={system.scanned ? '#41f0c1' : '#ffd166'}>
-            {system.scanned ? 'ОТСКАНИРОВАНА' : 'НЕ ИЗУЧЕНА'}
-          </Tag>
+          <Tag color={system.scanned ? '#41f0c1' : '#ffd166'}>{system.scanned ? 'СКАН ЕСТЬ' : 'НЕ ИЗУЧЕНА'}</Tag>
         }
       >
         <div className="grid3">
@@ -71,8 +77,8 @@ export function ExplorePanel({
           </div>
         </div>
         <Hint>
-          Сканер тратит топливо на каждую задачу и работает только над одной за раз. Модуль сканера ускоряет работу;{' '}
-          {siteNote}.
+          Сканер тратит топливо на каждую задачу и работает только над одной за раз. Модуль сканера ускоряет
+          работу; {siteNote}. Изучено поясов: {num(scanned)} из {num(system.belts.length)}.
         </Hint>
         {status ? (
           <>
@@ -164,7 +170,11 @@ export function ExplorePanel({
                 ) : null}
               </div>
               {belt.discovered ? (
-                <span className="dim">добыча — на вкладке СИСТЕМА</span>
+                <div className="row-actions">
+                  <Btn size="small" kind="primary" title="К добыче в этой системе" onClick={() => onOpen({ id: 'resources' })}>
+                    К ДОБЫЧЕ
+                  </Btn>
+                </div>
               ) : (
                 <Btn
                   size="small"
@@ -218,31 +228,6 @@ export function ExplorePanel({
         {system.connections.filter((id) => state.systems[id]?.discovered).length === 0 ? (
           <Hint>Соседей на карте нет: прыгните к соседу или просканируйте текущую систему.</Hint>
         ) : null}
-      </Panel>
-
-
-      <Panel title="Планеты текущей системы" tight>
-        {!system.scanned ? (
-          <Hint>Планеты видны только после полного скана системы.</Hint>
-        ) : (
-          system.planets.map((planet) => {
-            const kind = planetKindOf(planet);
-            return (
-              <div className="list-row" key={planet.id}>
-                <div className="list-main">
-                  <b>{planet.name}</b>
-                  <span className="dim">
-                    {kind.label} · {kind.buildable ? 'годится под станцию' : 'закладка невозможна'} ·{' '}
-                    {kind.bonus
-                      ? `+${Math.round(kind.bonusValue * 100)} % ${PLANET_BONUS_LABEL[kind.bonus]}`
-                      : 'без бонуса'}
-                  </span>
-                </div>
-                <span className="dim">{pct(kind.habitability)} пригодности</span>
-              </div>
-            );
-          })
-        )}
       </Panel>
     </>
   );

@@ -15,7 +15,7 @@ import { seedContractBoards } from '../economy/contracts.ts';
 import { resourceName } from '../data/resources.ts';
 import type { ResourceId } from '../types.ts';
 
-export const SAVE_VERSION = 3;
+export const SAVE_VERSION = 4;
 export const START_CREDITS = 20000;
 /** Имя, которое игрок даёт своей будущей станции. */
 export const START_STATION_NAME = 'Станция «Фронтир»';
@@ -118,6 +118,7 @@ export function createGameState(seed: string, playerName = 'CMDR'): GameState {
     },
     ships: [],
     station: createStartingStation(START_STATION_NAME),
+    depots: {},
     news: [],
     pendingEvent: null,
     survey: null,

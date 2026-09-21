@@ -197,6 +197,8 @@ export interface SystemStation {
   hasRefuel?: boolean;
   /** Ремонт корпуса. */
   hasRepair?: boolean;
+  /** Аренда склада: у фракционных станций ячейки под груз есть всегда. */
+  hasStorage?: boolean;
 }
 
 export interface AsteroidBelt {
@@ -502,6 +504,12 @@ export interface GameState {
   player: Player;
   ships: Ship[];
   station: PlayerStation;
+  /**
+   * Арендованные склады: ключ — id станции, значение — груз в её ячейках.
+   * Свой склад живёт в `station.storage`, потому что переработка, стройка и
+   * верфь работают именно с базой; доступ к обоим идёт через sim/depots.ts.
+   */
+  depots: Record<string, Amounts>;
   news: NewsItem[];
   pendingEvent: PendingEvent | null;
   /** Идущее сканирование, если есть. */

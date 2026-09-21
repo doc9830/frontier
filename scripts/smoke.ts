@@ -6,7 +6,8 @@
  * Run with: npm run smoke
  */
 import type { GameState, ResourceId } from '../src/game/types.ts';
-import { createGameState, playerShip } from '../src/game/state/create.ts';
+import { createGameState, playerShip, SAVE_VERSION } from '../src/game/state/create.ts';
+import { exportSave, importSave } from '../src/game/save.ts';
 import { advance, catchUp, resolvePendingEvent } from '../src/game/sim/engine.ts';
 import { eventDef, EVENT_DEFS, buildPayload } from '../src/game/events/events.ts';
 import { jumpPlan, travelTo } from '../src/game/actions/nav.ts';
@@ -27,7 +28,8 @@ import {
   serviceHere,
   unloadToStation,
 } from '../src/game/actions/trade.ts';
-import { serviceAccess } from '../src/game/data/stations.ts';
+import { serviceAccess, stationServices } from '../src/game/data/stations.ts';
+import { depotAmounts, depotHere } from '../src/game/sim/depots.ts';
 import {
   amountsSummary,
   beltById,
@@ -370,6 +372,54 @@ if (atMarket(state)) {
   );
 } else {
   check('selling from storage needs a market', sellStoredResource(state, 'ore', stored) === 0);
+}
+
+// --------------------------------------------------------------- per-station depots
+console.log('\n[5c] depots: каждая станция держит свой склад');
+{
+  const host = state.systemIds
+    .map((id) => state.systems[id])
+    .find(
+      (sys) =>
+        sys.id !== state.station.systemId &&
+        sys.stations.some((station) => !!station.factionId && stationServices(station).storage),
+    );
+  if (host) {
+    ship.travel = null;
+    ship.mission = null;
+    ship.status = 'docked';
+    ship.systemId = host.id;
+    ship.cargo = { ore: 8 };
+    const depot = depotHere(state);
+    check('faction station rents a warehouse', !!depot, depot ? `${depot.name}: ${depot.capacity} ед.` : 'none');
+    const homeOreBefore = state.station.storage.ore ?? 0;
+    const rented = depotHere(state);
+    if (rented && !rented.own) {
+      const moved = unloadToStation(state, null);
+      check('hold unloads into the rented cells', moved === 8, `${moved} of 8 units`);
+      check('rented goods keep their own accounting', (depotAmounts(state, rented.id).ore ?? 0) === 8);
+      check(
+        'the home warehouse stays untouched',
+        (state.station.storage.ore ?? 0) === homeOreBefore,
+        `${state.station.storage.ore ?? 0} ore at home`,
+      );
+      const back = loadFromStation(state, 'ore', 3);
+      check('goods load back on the spot', back === 3 && (ship.cargo.ore ?? 0) === 3);
+      const left = depotAmounts(state, rented.id).ore ?? 0;
+      check('the rest stays in the rented cells', left === 5, `${left} ore left`);
+      // Груз, оставленный здесь, не виден на других складах.
+      ship.systemId = state.station.systemId;
+      const home = depotHere(state);
+      check(
+        'another system sees its own (empty) depot',
+        !!home && home.id !== rented.id && (home.amounts.ore ?? 0) === 0,
+        home ? `${home.name}: ${home.amounts.ore ?? 0} ore` : 'no depot at home',
+      );
+      ship.cargo = {};
+    }
+  } else {
+    console.log('  skip no charted faction station with storage');
+  }
 }
 
 // --------------------------------------------------------------- contracts
@@ -818,6 +868,26 @@ check(
 check('pause freezes the simulation step', tickSeconds(2.5, defaults, true) === 0);
 check('time multiplier scales the step', tickSeconds(2, { ...defaults, speed: 4 }, false) === 8);
 check('a negative frame never rewinds time', tickSeconds(-5, defaults, false) === 0);
+
+// --------------------------------------------------------------- миграция сейва
+console.log('\n[11] save migration (v3 → v4)');
+{
+  // Сейв до арендуемых складов: у станций нет флага «склад», у мира нет depots.
+  const legacy = JSON.parse(exportSave(state)) as { version: number; state: GameState };
+  legacy.version = 3;
+  delete (legacy.state as Partial<GameState>).depots;
+  for (const id of legacy.state.systemIds) {
+    for (const station of legacy.state.systems[id]?.stations ?? []) delete station.hasStorage;
+  }
+  const restored = importSave(JSON.stringify(legacy));
+  check('legacy save still loads', !!restored);
+  check('depots table appears empty', !!restored && typeof restored.depots === 'object');
+  check(
+    'old stations start renting storage',
+    !!restored && restored.systemIds.every((id) => restored.systems[id].stations.every((st) => st.hasStorage !== false)),
+  );
+  check('save version is up to date', !!restored && restored.version === SAVE_VERSION);
+}
 
 console.log(`\n${checks - failures}/${checks} checks passed, ${failures} failed.`);
 if (failures > 0) throw new Error(`${failures} smoke check(s) failed.`);

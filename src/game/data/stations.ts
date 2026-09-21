@@ -6,7 +6,7 @@ import { LAWLESS_COLOR, LAWLESS_NAME, LAWLESS_SHORT } from './factions.ts';
  * пишет генератор, поэтому сейвы старых версий читаются без миграции.
  */
 
-export type StationService = 'market' | 'shipyard' | 'refuel' | 'repair' | 'contracts';
+export type StationService = 'market' | 'shipyard' | 'refuel' | 'repair' | 'contracts' | 'storage';
 
 export const SERVICE_INFO: Record<StationService, { label: string; short: string; hint: string }> = {
   market: { label: 'Рынок', short: 'РЫНОК', hint: 'Купить и продать товары по текущим ценам.' },
@@ -17,6 +17,11 @@ export const SERVICE_INFO: Record<StationService, { label: string; short: string
     label: 'Контракты',
     short: 'КОНТР',
     hint: 'Доставка грузов за кредиты и репутацию.',
+  },
+  storage: {
+    label: 'Склад',
+    short: 'СКЛАД',
+    hint: 'Арендованная ячейка: оставьте груз здесь и заберите в другой рейс.',
   },
 };
 
@@ -32,6 +37,23 @@ export const STATION_TYPE_INFO: Record<SystemStation['type'], { label: string; c
 /** Минимальная репутация, при которой фракционная станция вас обслуживает. */
 export const SERVICE_MIN_REP = 0;
 
+/**
+ * Объём арендованного склада на станции фракции. Свой склад расширяется
+ * постройками, а чужой всегда ограничен — иначе база была бы не нужна.
+ */
+export const RENTED_STORAGE: Record<SystemStation['type'], number> = {
+  trade: 900,
+  industrial: 700,
+  mining: 500,
+  military: 400,
+  research: 600,
+  pirate: 250,
+};
+
+export function rentedStorageCapacity(station: SystemStation): number {
+  return RENTED_STORAGE[station.type] ?? 400;
+}
+
 export function stationServices(station: SystemStation): Record<StationService, boolean> {
   return {
     market: station.hasMarket,
@@ -42,12 +64,18 @@ export function stationServices(station: SystemStation): Record<StationService, 
     repair:
       station.hasRepair ??
       (station.hasShipyard || station.type === 'trade' || station.type === 'industrial' || station.type === 'pirate'),
+    storage: station.hasStorage ?? true,
   };
 }
 
 export function stationServiceList(station: SystemStation): StationService[] {
   const flags = stationServices(station);
   return (Object.keys(SERVICE_INFO) as StationService[]).filter((s) => flags[s]);
+}
+
+/** «Торговая станция», «Пиратская станция» — подпись типа для карточек. */
+export function stationTypeLabel(type: SystemStation['type']): string {
+  return `${(STATION_TYPE_INFO[type]?.label ?? type).toLowerCase()} станция`;
 }
 
 export function stationOwnerName(state: GameState, station: SystemStation): string {
@@ -96,6 +124,29 @@ export function serviceAccess(
   return { ok: true, reason: null };
 }
 
+/**
+ * Своя станция как обычная станция системы: эти же флаги услуг читает UI, а
+ * набор услуг выводится из построек базы. Пока идёт закладка (phase 'planned'),
+ * станции ещё нет — вернётся null.
+ */
+export function ownStationRecord(state: GameState): SystemStation | null {
+  const station = state.station;
+  if (!station.systemId || (station.phase ?? 'operational') === 'planned') return null;
+  const dock = (station.buildings.dock ?? 0) > 0;
+  return {
+    id: station.id,
+    name: station.name,
+    type: 'industrial',
+    factionId: null,
+    hasMarket: false,
+    hasShipyard: (station.buildings.shipyard ?? 0) > 0,
+    hasContracts: false,
+    hasRefuel: dock,
+    hasRepair: dock,
+    hasStorage: (station.buildings.warehouse ?? 0) > 0,
+  };
+}
+
 /** Станции текущей системы корабля вместе с их услугами и допуском. */
 export interface DockedStation {
   station: SystemStation;
@@ -109,7 +160,10 @@ export interface DockedStation {
 export function dockedStations(state: GameState, shipSystemId: string): DockedStation[] {
   const system = state.systems[shipSystemId];
   if (!system) return [];
-  return system.stations.map((station) => {
+  const own = ownStationRecord(state);
+  const list: SystemStation[] =
+    own && state.station.systemId === shipSystemId ? [own, ...system.stations] : system.stations;
+  return list.map((station) => {
     const services = stationServices(station);
     const allowed: Record<StationService, boolean> = { ...services };
     let reason: string | null = null;

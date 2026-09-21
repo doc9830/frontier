@@ -4,7 +4,7 @@ import { playerShip } from '../../game/state/create.ts';
 import { RESOURCES } from '../../game/data/resources.ts';
 import { availableStock, marketPrice } from '../../game/economy/market.ts';
 import { SERVICE_INFO, stationOwnerName } from '../../game/data/stations.ts';
-import { storageCapacity, storageUsed } from '../../game/sim/station.ts';
+import { depotHere } from '../../game/sim/depots.ts';
 import { cargoFree, cargoUsed, shipStats } from '../../game/ships/ship.ts';
 import { siteTradeBonus } from '../../game/site/site.ts';
 import {
@@ -40,7 +40,7 @@ export function MarketPanel({
   const open = atMarket(state);
   const board = serviceHere(state, 'market');
   const refusal = marketRefusal(state);
-  const stationHere = atOwnStation(state);
+  const depot = depotHere(state);
   const siteBonus = siteTradeBonus(state);
   const bonus = researchPriceBonus(state);
 
@@ -53,8 +53,8 @@ export function MarketPanel({
         />
         <Row label="Кредиты" value={cr(state.player.credits)} />
         <Row
-          label="Склад станции"
-          value={`${num(storageUsed(state.station))} / ${num(storageCapacity(state.station))}`}
+          label="Склад здесь"
+          value={depot ? `${depot.name}: ${num(depot.used)} / ${num(depot.capacity)} ед.` : 'нет доступного склада'}
         />
         <Row label="Анализ рынка" value={`×${bonus.toFixed(2)} к ценам`} />
       </div>
@@ -64,12 +64,12 @@ export function MarketPanel({
           value={`${board.station.name} · ${stationOwnerName(state, board.station)} · ${SERVICE_INFO.market.label}`}
         />
       ) : null}
-      {stationHere ? <Row label="Своя станция" value={`бонус площадки ±${pct(siteBonus)} к спреду`} /> : null}
+      {atOwnStation(state) ? <Row label="Своя станция" value={`бонус площадки ±${pct(siteBonus)} к спреду`} /> : null}
 
       {!open ? (
         <Hint>
           {refusal ?? 'Рынок закрыт.'} Рынки есть на торговых станциях и на чёрных рынках безвластия: прыгните к
-          соседу или проверьте список услуг во вкладке СИСТЕМА.
+          соседу или посмотрите услуги станций в разделе «Система» → «Станции».
         </Hint>
       ) : (
         <>
@@ -79,8 +79,8 @@ export function MarketPanel({
             </Btn>
             <Btn
               size="small"
-              disabled={!stationHere}
-              title={stationHere ? 'Перенести трюм на свою станцию' : 'Только на своей станции'}
+              disabled={!depot}
+              title={depot ? `Перенести трюм в «${depot.name}»` : 'Склада рядом нет'}
               onClick={() => run((draft) => unloadToStation(draft, null))}
             >
               ВЫГРУЗИТЬ НА СКЛАД
@@ -93,7 +93,7 @@ export function MarketPanel({
               state={state}
               resource_={def}
               shipId={ship.id}
-              stationHere={stationHere}
+              depot={depot}
               run={run}
             />
           ))}
@@ -103,8 +103,8 @@ export function MarketPanel({
             обрушите там цену.
           </Hint>
           <Hint>
-            Склад вашей станции: {amountsText(state.station.storage)}. Переработка берёт сырьё прямо оттуда, а не из
-            трюма.
+            Склад здесь: {depot ? amountsText(depot.amounts) : 'недоступен'}. Со своей базы сырьё берёт переработка,
+            а с арендованного склада товар можно продать кнопкой в разделе «Груз» → «Склад».
           </Hint>
         </>
       )}
@@ -117,13 +117,13 @@ function MarketRow({
   state,
   resource_,
   shipId,
-  stationHere,
+  depot,
   run,
 }: {
   state: GameState;
   resource_: ResourceDef;
   shipId: string;
-  stationHere: boolean;
+  depot: ReturnType<typeof depotHere>;
   run: (mutator: (draft: GameState) => void) => void;
 }) {
   const ship = state.ships.find((s) => s.id === shipId) as Ship;
@@ -137,7 +137,7 @@ function MarketRow({
   const trendColor = drift > 1.08 ? '#7ef7b0' : drift < 0.92 ? '#ff6b6b' : '#6d8a92';
   const stock = system ? availableStock(system.market, id) : 0;
   const held = ship.cargo[id] ?? 0;
-  const stored = state.station.storage[id] ?? 0;
+  const stored = depot ? depot.amounts[id] ?? 0 : 0;
   const maxBuy = maxBuyable(state, id);
   const limit = Math.max(1, maxBuy, held);
   const [qty, setQty] = useState(() => Math.max(1, Math.min(10, limit)));
@@ -193,8 +193,8 @@ function MarketRow({
         </Btn>
         <Btn
           size="tiny"
-          disabled={!stationHere || stored <= 0}
-          title={stationHere ? 'Взять со склада в трюм' : 'Только на своей станции'}
+          disabled={!depot || stored <= 0}
+          title={depot ? `Взять со склада «${depot.name}»` : 'Склада рядом нет'}
           onClick={() => run((draft) => loadFromStation(draft, id, qty))}
         >
           СО СКЛАДА {num(Math.min(qty, stored))}

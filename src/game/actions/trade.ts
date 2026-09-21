@@ -19,7 +19,7 @@ import {
   sellableUnits,
   shipStats,
 } from '../ships/ship.ts';
-import { addStorage, removeStorage, storageFree } from '../sim/station.ts';
+import { addToDepot, depotHere, depotRecord, depotRefusal, takeFromDepot } from '../sim/depots.ts';
 import { addToast } from '../sim/toast.ts';
 import { addNews } from '../news/news.ts';
 import {
@@ -118,14 +118,14 @@ export function maxBuyable(state: GameState, id: ResourceId): number {
   );
 }
 
-/** Сколько единиц вы можете продать с трюма и со склада. */
+/** Сколько единиц вы можете продать с трюма и со склада под ногами. */
 export function maxSellable(state: GameState, id: ResourceId, fromStorage = false): number {
   const ship = playerShip(state);
   if (!ship) return 0;
   // Опечатанный контрактный груз продаже не подлежит.
   const inHold = sellableUnits(ship, id);
   if (!fromStorage) return inHold;
-  return inHold + (state.station.storage[id] ?? 0);
+  return inHold + (depotHere(state)?.amounts[id] ?? 0);
 }
 
 /** Доступ к рынку конкретной системы (для торговых маршрутов флота). */
@@ -220,8 +220,8 @@ export function sellResource(state: GameState, id: ResourceId, qty: number): num
 }
 
 /**
- * Sells goods straight from station storage. Only possible where the market is
- * open and only at your own station, because the goods sit in its warehouse.
+ * Продаёт товар прямо со склада, у которого стоит корабль. Склад может быть
+ * своим или арендованным — важно лишь, чтобы в этой же системе был рынок.
  */
 export function sellStoredResource(state: GameState, id: ResourceId, qty: number): number {
   const ship = playerShip(state);
@@ -233,18 +233,20 @@ export function sellStoredResource(state: GameState, id: ResourceId, qty: number
     addToast(state, refusal, 'bad');
     return 0;
   }
-  if (state.station.systemId !== ship.systemId) {
-    addToast(state, 'Продавать со склада можно только на своей станции.', 'bad');
+  const depot = depotHere(state);
+  const record = depot ? depotRecord(state, depot.id) : null;
+  if (!depot || !record) {
+    addToast(state, depotRefusal(state) ?? 'Продавать со склада здесь нечего.', 'bad');
     return 0;
   }
-  const stored = state.station.storage[id] ?? 0;
+  const stored = depot.amounts[id] ?? 0;
   const units = Math.min(Math.floor(qty), stored);
   if (units <= 0) {
-    addToast(state, `На складе нет «${resource(id).name}».`, 'bad');
+    addToast(state, `В складе «${depot.name}» нет «${resource(id).name}».`, 'bad');
     return 0;
   }
   const price = Math.max(1, sellPriceAt(state, id));
-  removeStorage(state, { [id]: units });
+  takeFromDepot(state, record, { [id]: units });
   applySell(system.market, id, units);
   const revenue = units * price;
   state.player.credits += revenue;
@@ -253,7 +255,9 @@ export function sellStoredResource(state: GameState, id: ResourceId, qty: number
   const rep = changeReputation(state, system.factionId, tradeReputationGain(units));
   addToast(
     state,
-    `Со склада продано ${units} × ${resource(id).name} за ${revenue} кр.${rep > 0 ? ` Репутация +${rep}.` : ''}`,
+    `Со склада «${depot.name}» продано ${units} × ${resource(id).name} за ${revenue} кр.${
+      rep > 0 ? ` Репутация +${rep}.` : ''
+    }`,
     'good',
   );
   return units;
@@ -270,57 +274,54 @@ export function sellEverything(state: GameState): number {
   return total;
 }
 
-/** Ship cargo → station storage (requires being at the home station). */
+/** Трюм → склад той станции, у которой стоит корабль (своя база или аренда). */
 export function unloadToStation(state: GameState, id: ResourceId | null): number {
   const ship = playerShip(state);
   if (!ship) return 0;
-  if (ship.systemId !== state.station.systemId) {
-    addToast(state, 'Разгрузить можно только на своей станции.', 'bad');
+  const depot = depotHere(state);
+  if (!depot) {
+    addToast(state, depotRefusal(state) ?? 'Разгружать здесь некуда.', 'bad');
     return 0;
   }
-  if (stationPhase(state) === 'planned') {
-    addToast(state, 'Сначала заложите склад на выбранной планете: хранить груз пока негде.', 'bad');
-    return 0;
-  }
+  const record = depotRecord(state, depot.id);
+  if (!record) return 0;
   const ids = id ? [id] : (Object.keys(ship.cargo) as ResourceId[]);
   let moved = 0;
   let lost = 0;
   for (const key of ids) {
     const units = removeCargo(ship, key, sellableUnits(ship, key));
     if (units <= 0) continue;
-    const result = addStorage(state, { [key]: units });
+    const result = addToDepot(state, record, { [key]: units });
     moved += result.added;
     lost += result.lost;
   }
-  if (lost > 0) addToast(state, `Склад переполнен: потеряно ${lost} ед.`, 'bad');
+  if (lost > 0) addToast(state, `Склад «${depot.name}» переполнен: потеряно ${lost} ед.`, 'bad');
   const sealedLeft = sealedTotal(ship);
   if (sealedLeft > 0) {
     addToast(state, `Опечатанный груз (${sealedLeft} ед.) остаётся в трюме: его сдают по контракту.`, 'info');
   }
-  if (moved > 0) addToast(state, `Разгружено ${moved} ед. на склад «${state.station.name}».`, 'good');
+  if (moved > 0) addToast(state, `Разгружено ${moved} ед. в склад «${depot.name}».`, 'good');
   return moved;
 }
 
-/** Station storage → ship cargo. */
+/** Склад → трюм корабля. */
 export function loadFromStation(state: GameState, id: ResourceId, qty: number): number {
   const ship = playerShip(state);
   if (!ship) return 0;
-  if (ship.systemId !== state.station.systemId) {
-    addToast(state, 'Загрузить груз можно только на своей станции.', 'bad');
+  const depot = depotHere(state);
+  const record = depot ? depotRecord(state, depot.id) : null;
+  if (!depot || !record) {
+    addToast(state, depotRefusal(state) ?? 'Загружать здесь нечего.', 'bad');
     return 0;
   }
-  if (stationPhase(state) === 'planned') {
-    addToast(state, 'На участке ещё нет склада: грузить нечего.', 'bad');
-    return 0;
-  }
-  const units = Math.min(Math.floor(qty), state.station.storage[id] ?? 0, cargoFree(ship));
+  const units = Math.min(Math.floor(qty), depot.amounts[id] ?? 0, cargoFree(ship));
   if (units <= 0) {
     addToast(state, 'Загружать нечего.', 'bad');
     return 0;
   }
-  removeStorage(state, { [id]: units });
+  takeFromDepot(state, record, { [id]: units });
   addCargo(ship, id, units);
-  addToast(state, `В трюм загружено: ${units} × ${resource(id).name}.`, 'info');
+  addToast(state, `В трюм загружено: ${units} × ${resource(id).name} со склада «${depot.name}».`, 'info');
   return units;
 }
 
@@ -405,7 +406,7 @@ export function shipLoadSummary(ship: Ship): string {
 }
 
 export function stationStorageFree(state: GameState): number {
-  return storageFree(state.station);
+  return depotHere(state)?.free ?? 0;
 }
 
 export function logTradeNews(state: GameState, text: string, systemId: string | null): void {

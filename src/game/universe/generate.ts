@@ -218,6 +218,8 @@ function createStations(
       hasContracts: flags.contracts,
       hasRefuel: true,
       hasRepair: type === 'military' ? rng.chance(0.7) : true,
+      // Склад под аренду есть у любой станции: у пиратских объём скромнее.
+      hasStorage: true,
     });
   };
 

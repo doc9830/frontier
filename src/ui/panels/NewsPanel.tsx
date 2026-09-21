@@ -10,27 +10,17 @@ import { stationPhase, chosenSite, siteCandidates } from '../../game/site/site.t
 import { foundationState } from '../../game/actions/site.ts';
 import { cr, newsTag, num } from '../format.ts';
 import { Btn, Hint, Panel, Row, Tag } from '../kit.tsx';
+import { destination, destinationLabel } from '../nav.ts';
+import type { Destination } from '../nav.ts';
 
 /** Feed, stats and the "what now" nudges that keep the sandbox readable. */
-
-export type TabId =
-  | 'system'
-  | 'explore'
-  | 'cargo'
-  | 'market'
-  | 'ship'
-  | 'station'
-  | 'fleet'
-  | 'contracts'
-  | 'news'
-  | 'settings';
 
 export function NewsPanel({
   state,
   onGoTo,
 }: {
   state: GameState;
-  onGoTo: (tab: TabId) => void;
+  onGoTo: (dest: Destination) => void;
 }) {
   const ship = playerShip(state);
   const system = ship ? state.systems[ship.systemId] : null;
@@ -48,7 +38,7 @@ export function NewsPanel({
   const storageRatio = storageUsed(state.station) / Math.max(1, storageCapacity(state.station));
   const slotsFree = totalSlots(state.station.level) - slotsUsed(state.station);
   const fleetFree = fleetCap(state) - state.ships.length;
-  const suggestions: { text: string; tab: TabId; label: string }[] = [];
+  const suggestions: { text: string; dest: Destination; label: string }[] = [];
 
   // Воронка станции идёт первой: пока база не введена в строй, остальные советы
   // бессмысленны.
@@ -57,14 +47,14 @@ export function NewsPanel({
       const candidates = siteCandidates(state);
       suggestions.push({
         text: 'Участка нет: найдите ничью систему, просканируйте её и выберите планету с твёрдой корой.',
-        tab: 'station',
+        dest: destination('system', 'site'),
         label: 'УЧАСТОК',
       });
       if (candidates.length === 0) {
         suggestions.push({
           text: 'Ничьих систем на карте не видно — расширьте карту сканером.',
-          tab: 'explore',
-          label: 'РАЗВЕДКА',
+          dest: destination('system', 'research'),
+          label: 'ИССЛЕДОВАНИЕ',
         });
       }
     } else {
@@ -73,7 +63,7 @@ export function NewsPanel({
         text: info.ok
           ? `Всё готово для закладки склада у ${site.planet.name}.`
           : info.reasons[0] ?? 'Закладка пока невозможна.',
-        tab: 'station',
+        dest: destination('system', 'site'),
         label: 'ЗАЛОЖИТЬ',
       });
     }
@@ -81,64 +71,64 @@ export function NewsPanel({
   if (phase === 'foundation') {
     suggestions.push({
       text: 'Базовая станция ещё не введена в строй: привезите металл и электронику на склад и постройте КЦ Mk1.',
-      tab: 'station',
+      dest: destination('system', 'base'),
       label: 'СТРОЙКА',
     });
   }
   if (state.survey) {
     suggestions.push({
-      text: 'Сканер работает: прогресс и прерывание — во вкладке разведки.',
-      tab: 'explore',
-      label: 'РАЗВЕДКА',
+      text: 'Сканер работает: прогресс и прерывание — в разделе «Система» → «Исследование».',
+      dest: destination('system', 'research'),
+      label: 'ИССЛЕДОВАНИЕ',
     });
   }
   if (ship && ship.mission?.kind === 'mine') {
     suggestions.push({
-      text: 'Идёт вахта в поясе: план, прогресс и остановка — во вкладке СИСТЕМА.',
-      tab: 'system',
+      text: 'Идёт вахта в поясе: план, прогресс и остановка — в разделе «Система» → «Ресурсы».',
+      dest: destination('system', 'resources'),
       label: 'ДОБЫЧА',
     });
   }
   if (!market)
     suggestions.push({
       text: 'Здесь нет рынка — прыгните в систему с торговой станцией.',
-      tab: 'system',
+      dest: destination('system'),
       label: 'ПРЫЖКИ',
     });
   if (storageRatio > 0.85)
     suggestions.push({
       text: 'Склад станции почти полон: постройте ещё склад или запустите переработку.',
-      tab: 'station',
-      label: 'СТАНЦИЯ',
+      dest: destination('system', 'base'),
+      label: 'БАЗА',
     });
   if (state.station.buildings.refinery > 0 && state.station.production.length === 0)
     suggestions.push({
       text: 'Переработка простаивает — запустите партию, чтобы превратить руду в металл.',
-      tab: 'station',
+      dest: destination('system', 'base'),
       label: 'ПЕРЕРАБОТКА',
     });
   if (phase === 'operational' && slotsFree <= 1)
     suggestions.push({
       text: 'Остался один слот под постройку: уровень командного центра добавит ещё два.',
-      tab: 'station',
+      dest: destination('system', 'base'),
       label: 'УЛУЧШИТЬ',
     });
   if (fleetFree > 0 && state.ships.length < 3)
     suggestions.push({
       text: `Свободно мест во флоте: ${fleetFree} — второй корпус сам будет добывать или торговать.`,
-      tab: 'ship',
+      dest: destination('ship', 'shipyard'),
       label: 'ВЕРФЬ',
     });
   if (ship && ship.fuel < 25)
     suggestions.push({
       text: 'Мало топлива — заправьтесь на станции или запустите рецепт топлива.',
-      tab: 'ship',
+      dest: destination('ship'),
       label: 'СЛУЖБЫ',
     });
   if (nextUpgrade)
     suggestions.push({
       text: `«${nextUpgrade.name}» — следующее улучшение (${cr(nextUpgrade.cost)}) на «${yard?.label ?? 'верфи'}».`,
-      tab: 'ship',
+      dest: destination('ship', 'shipyard'),
       label: 'МОДУЛИ',
     });
   if (ship && yard && yard.tier <= 0)
@@ -146,7 +136,7 @@ export function NewsPanel({
       text:
         yard.blockedReason ??
         'Верфь ставит модули: у фракций она в узловых системах, свою можно построить на базе.',
-      tab: 'ship',
+      dest: destination('ship', 'shipyard'),
       label: 'ВЕРФЬ',
     });
 
@@ -162,7 +152,7 @@ export function NewsPanel({
               <div className="list-main">
                 <span className="dim">{tip.text}</span>
               </div>
-              <Btn size="tiny" onClick={() => onGoTo(tip.tab)}>
+              <Btn size="tiny" title={destinationLabel(tip.dest)} onClick={() => onGoTo(tip.dest)}>
                 {tip.label}
               </Btn>
             </div>

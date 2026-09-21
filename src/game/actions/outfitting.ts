@@ -18,7 +18,7 @@ import { makerOf, powerBudgetFor, removeCargo, shipStats } from '../ships/ship.t
 import { addToast } from '../sim/toast.ts';
 import { addNews } from '../news/news.ts';
 import { fleetCap, fleetShips } from '../sim/fleet.ts';
-import { removeStorage } from '../sim/station.ts';
+import { depotHere, depotRecord, takeFromDepot } from '../sim/depots.ts';
 import { serviceAccess } from '../data/stations.ts';
 
 /**
@@ -236,11 +236,10 @@ export function moduleOfferGroups(state: GameState, ship: Ship): ModuleOfferGrou
 }
 
 
-/** Сколько материалов уже под рукой: трюм плюс свой склад в этой же системе. */
+/** Сколько материалов уже под рукой: трюм плюс склад, у которого стоит корабль. */
 function availableUnits(state: GameState, ship: Ship, id: ResourceId): number {
   const inHold = ship.cargo[id] ?? 0;
-  const inStation = ship.systemId === state.station.systemId ? state.station.storage[id] ?? 0 : 0;
-  return inHold + inStation;
+  return inHold + (depotHere(state)?.amounts[id] ?? 0);
 }
 
 /**
@@ -266,7 +265,7 @@ function hasMaterials(state: GameState, ship: Ship, materials: Amounts): boolean
 }
 
 
-/** Materials are taken from the hold first and topped up from station storage. */
+/** Materials are taken from the hold first and topped up from the depot here. */
 function spendMaterials(state: GameState, ship: Ship, materials: Amounts): void {
   const fromHold: Amounts = {};
   const fromStation: Amounts = {};
@@ -279,7 +278,11 @@ function spendMaterials(state: GameState, ship: Ship, materials: Amounts): void 
   for (const [id, qty] of Object.entries(fromHold) as [ResourceId, number][]) {
     removeCargo(ship, id, qty);
   }
-  if (Object.keys(fromStation).length > 0) removeStorage(state, fromStation);
+  if (Object.keys(fromStation).length > 0) {
+    const depot = depotHere(state);
+    const record = depot ? depotRecord(state, depot.id) : null;
+    if (record) takeFromDepot(state, record, fromStation);
+  }
 }
 
 export function installModule(state: GameState, ship: Ship, type: ModuleType, level: number): boolean {

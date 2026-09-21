@@ -30,6 +30,7 @@ function storage(): Storage | null {
  * поэтому такие станции считаются действующими, а пояса получают запас.
  * В v3 появились контракты-курьеры и клейма верфей: старые записи доски
  * становятся контрактами-поставками, а модули — серийной сборкой.
+ * В v4 появились арендуемые склады на станциях фракций (услуга «склад»).
  */
 function migrate(state: GameState, fromVersion: number): GameState {
   if (fromVersion < SAVE_VERSION) {
@@ -63,6 +64,8 @@ function migrate(state: GameState, fromVersion: number): GameState {
         if (typeof systemStation.hasRepair !== 'boolean') {
           systemStation.hasRepair = !!systemStation.hasShipyard || systemStation.type !== 'military';
         }
+        // Арендуемые склады появились в v4: у старых станций услуга есть.
+        if (typeof systemStation.hasStorage !== 'boolean') systemStation.hasStorage = true;
       }
     }
     for (const ship of state.ships ?? []) {
@@ -82,6 +85,8 @@ function normalize(state: GameState): GameState {
   state.pendingEvent = state.pendingEvent ?? null;
   state.survey = state.survey ?? null;
   state.toast = state.toast ?? null;
+  // Склады по станциям появились в v4: у старых сейвов их просто нет.
+  state.depots = state.depots ?? {};
   state.ships = Array.isArray(state.ships) ? state.ships : [];
   state.player.reputation = state.player.reputation ?? {};
   state.lastSimulationTime = state.lastSimulationTime || Date.now();

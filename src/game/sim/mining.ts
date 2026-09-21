@@ -220,7 +220,7 @@ export function startMining(
   };
   addToast(
     state,
-    `План вахты в поясе ${found.belt.name}: ${amountsSummary(target)}. Прогресс и остановка — во вкладке СИСТЕМА.`,
+    `План вахты в поясе ${found.belt.name}: ${amountsSummary(target)}. Прогресс и остановка — в разделе «Система» → «Ресурсы».`,
     'info',
   );
   return true;

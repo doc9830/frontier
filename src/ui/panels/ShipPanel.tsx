@@ -1,38 +1,32 @@
 import { useState } from 'react';
-import type { GameState, ModuleType, ResourceId } from '../../game/types.ts';
+import type { GameState, ResourceId } from '../../game/types.ts';
 import { playerShip } from '../../game/state/create.ts';
 import { shipType } from '../../game/data/ships.ts';
 import { resource } from '../../game/data/resources.ts';
-import { moduleDef, requiredShipyardLevel } from '../../game/data/modules.ts';
+import { moduleDef } from '../../game/data/modules.ts';
 import { makerDef } from '../../game/data/makers.ts';
-import { cargoUsed, sealedTotal, shipStats } from '../../game/ships/ship.ts';
-import {
-  hullsForSale,
-  installModule,
-  moduleOfferGroups,
-  purchaseShip,
-  renameShip,
-  shipyardHere,
-} from '../../game/actions/outfitting.ts';
-import {
-  refuelCost,
-  refuelShip,
-  repairCost,
-  repairShip,
-  serviceHere,
-} from '../../game/actions/trade.ts';
+import { MODULE_GROUPS } from '../../game/data/modules.ts';
+import { cargoUsed, makerOf, sealedTotal, shipStats } from '../../game/ships/ship.ts';
+import { renameShip, shipyardHere } from '../../game/actions/outfitting.ts';
+import { refuelCost, refuelShip, repairCost, repairShip, serviceHere } from '../../game/actions/trade.ts';
+import { depotHere, depotRefusal } from '../../game/sim/depots.ts';
 import { barColor, cr, num } from '../format.ts';
-import { Btn, Hint, Meter, Panel, Row, Tag } from '../kit.tsx';
+import { Btn, Hint, Hub, Meter, Panel, Row, Tag, Tile } from '../kit.tsx';
+import type { Screen } from '../nav.ts';
 
-
-/** Flagship screen: stats, module fitting, dock services and hull sales. */
+/**
+ * Раздел «Корабль»: состояние флагмана и входы в сервисы. Установка модулей
+ * переехала на подэкран верфи — здесь остались сводка сборки, док и ремонт.
+ */
 
 export function ShipPanel({
   state,
   run,
+  onOpen,
 }: {
   state: GameState;
   run: (mutator: (draft: GameState) => void) => void;
+  onOpen: (screen: Screen) => void;
 }) {
   const ship = playerShip(state);
   const [draftName, setDraftName] = useState('');
@@ -40,13 +34,11 @@ export function ShipPanel({
 
   const stats = shipStats(ship);
   const type = shipType(ship.typeId);
-  const groups = moduleOfferGroups(state, ship);
-  const hulls = hullsForSale(state, ship);
-  // Доковые услуги теперь отдельный сервис: он может быть закрыт по репутации.
+  const yard = shipyardHere(state, ship);
+  const depot = depotHere(state);
   const refuelService = serviceHere(state, 'refuel');
   const repairService = serviceHere(state, 'repair');
   const docked = refuelService?.ok === true;
-  const yard = shipyardHere(state, ship);
   const sealed = sealedTotal(ship);
   const refuelPrice = refuelCost(state, ship);
   const repairPrice = repairCost(state, ship);
@@ -58,7 +50,6 @@ export function ShipPanel({
     run((draft) => renameShip(draft, ship.id, name));
     setDraftName('');
   };
-
 
   return (
     <>
@@ -111,10 +102,7 @@ export function ShipPanel({
 
         <Row label="Трюм" value={`${num(cargoUsed(ship))} / ${num(stats.cargo)} ед.`} />
         {sealed > 0 ? (
-          <Row
-            label="Опечатанный груз"
-            value={`${num(sealed)} ед. · контракт, продаже не подлежит`}
-          />
+          <Row label="Опечатанный груз" value={`${num(sealed)} ед. · контракт, продаже не подлежит`} />
         ) : null}
         <Row label="Побед в бою" value={num(ship.kills)} />
         <Row label="Добыто" value={`${num(ship.minedUnits)} ед.`} />
@@ -126,7 +114,7 @@ export function ShipPanel({
         ) : (
           <Hint>Трюм пуст.</Hint>
         )}
-        <div style={{ display: 'flex', gap: 6 }}>
+        <div className="name-row">
           <input
             className="text"
             placeholder="новое имя корабля"
@@ -140,132 +128,80 @@ export function ShipPanel({
         </div>
       </Panel>
 
-      <Panel
-        title="Модули"
-        actions={
-          <Tag color={yard.tier > 0 ? '#41f0c1' : undefined}>
-            {yard.tier > 0 ? 'ВЕРФЬ РЯДОМ' : 'НЕТ ВЕРФИ'}
-          </Tag>
-        }
-        tight
-      >
-        <Row
-          label="Верфь"
-          value={
-            yard.tier > 0
-              ? `${yard.label} · модули до Mk ${Math.min(3, yard.tier + 1)}`
-              : yard.blockedReason ?? 'в этой системе верфи нет'
-          }
-        />
-        <Hint>
-          {yard.hint} Модули разных верфей сочетаются на одном корпусе: клеймо видно в названии. Материалы верфь
-          берёт из трюма, а на своей базе — ещё и со склада; недостающее продают на рынке.
-        </Hint>
-        {groups.map((group) => (
-          <div key={group.id}>
-            <div className="list-row">
+      <Panel title="Куда дальше" tight>
+        <Hub>
+          <Tile
+            label="ВЕРФЬ"
+            hint={yard.tier > 0 ? `${yard.label} · до Mk ${Math.min(3, yard.tier + 1)}` : 'нет доступной верфи'}
+            tone={yard.tier > 0 ? 'primary' : undefined}
+            disabled={yard.tier <= 0}
+            title={yard.tier > 0 ? 'Модули и корпуса' : yard.blockedReason ?? 'В этой системе верфи нет'}
+            onClick={() => onOpen({ id: 'shipyard' })}
+          />
+          <Tile
+            label="СКЛАД"
+            hint={depot ? `${depot.name} · свободно ${num(depot.free)} ед.` : 'нет доступного склада'}
+            disabled={!depot}
+            title={depot ? 'Переложить груз между трюмом и складом' : depotRefusal(state) ?? 'Склад недоступен'}
+            onClick={() => onOpen({ id: 'storage' })}
+          />
+          <Tile label="СТАНЦИЯ" hint="услуги, рынок, контракты" onClick={() => onOpen({ id: 'stations' })} />
+          <Tile label="РЫНОК" hint="цены и продажа" onClick={() => onOpen({ id: 'market' })} />
+        </Hub>
+        <Hint>Кнопки открывают подэкраны: из них возвращает «назад» или аппаратная кнопка телефона.</Hint>
+      </Panel>
+
+
+      <Panel title="Сборка корабля" tight>
+        {MODULE_GROUPS.map((group) => {
+          const installed = group.types.map((entry) => ({
+            type: entry,
+            level: ship.modules[entry] ?? 0,
+            maker: makerOf(ship, entry),
+          }));
+          const maxInstalled = installed.reduce((max, item) => Math.max(max, item.level), 0);
+          return (
+            <div className="list-row" key={group.id}>
               <div className="list-main">
                 <b>{group.label}</b>
                 <span className="dim">
-                  {group.installed
-                    .map((entry) => {
-                      const short = moduleDef(entry.type).short;
-                      if (entry.level <= 0) return `${short}: пусто`;
-                      const mark = entry.maker === 'standard' ? '' : `·${makerDef(entry.maker).short}`;
-                      return `${short}: Mk ${entry.level}${mark}`;
+                  {installed
+                    .map((item) => {
+                      const short = moduleDef(item.type).short;
+                      if (item.level <= 0) return `${short}: пусто`;
+                      const mark = item.maker === 'standard' ? '' : ` ·${makerDef(item.maker).short}`;
+                      return `${short}: Mk ${item.level}${mark}`;
                     })
                     .join(' · ')}
                 </span>
               </div>
-              <Tag color={group.maxInstalled > 0 ? '#41f0c1' : undefined}>
-                {group.maxInstalled > 0 ? `Mk ${group.maxInstalled}` : 'НЕ СТАВИЛОСЬ'}
+              <Tag color={maxInstalled > 0 ? '#41f0c1' : undefined}>
+                {maxInstalled > 0 ? `Mk ${maxInstalled}` : 'ПУСТО'}
               </Tag>
             </div>
-            {group.hint ? <Hint>{group.hint}</Hint> : null}
-            {group.offers.map((offer) => {
-              const canInstall =
-                !offer.owned && !offer.locked && offer.affordable && offer.powered && offer.hasMaterials;
-              const missing = offer.needs.filter((need) => !need.ok);
-              const reason = offer.owned
-                ? 'Уже установлено'
-                : offer.locked
-                  ? `Нужна верфь уровня ${requiredShipyardLevel(offer.level)}: ${yard.label}`
-                  : !offer.powered
-                    ? 'Перегрузка реактора — поставьте реактор мощнее'
-                    : missing.length > 0
-                      ? `Не хватает: ${missing.map((need) => `${need.name} ${need.have}/${need.need}`).join(', ')}`
-                      : !offer.affordable
-                        ? 'Не хватает кредитов'
-                        : 'Можно установить';
-              return (
-                <div className="list-row" key={`${offer.type}-${offer.level}`}>
-                  <div className="list-main">
-                    <b>{offer.name}</b>
-                    <span className="dim">
-                      {offer.cost > 0 ? `${cr(offer.cost)} · ` : 'есть · '}
-                      {offer.power > 0 ? `${num(offer.power)} эн · ` : ''}
-                      {offer.note}
-                    </span>
-                    {offer.needs.length > 0 ? (
-                      <span className="dim">
-                        материалы:{' '}
-                        {offer.needs
-                          .map(
-                            (need) =>
-                              `${need.name} ${num(need.have)}/${num(need.need)}${need.ok ? '' : ' ✗'}`,
-                          )
-                          .join(' · ')}
-                      </span>
-                    ) : null}
-                  </div>
-                  <Btn
-                    size="small"
-                    kind="primary"
-                    disabled={!canInstall}
-                    title={reason}
-                    onClick={() =>
-                      run((draft) => installModule(draft, liveShip(draft), offer.type as ModuleType, offer.level))
-                    }
-                  >
-                    {offer.owned ? 'УСТАНОВЛЕНО' : 'УСТАНОВИТЬ'}
-                  </Btn>
-                </div>
-              );
-            })}
-          </div>
-        ))}
+          );
+        })}
+        <Hint>
+          {yard.tier > 0
+            ? `Модули ставит ${yard.label}. Откройте «Верфь», чтобы посмотреть предложения.`
+            : 'Модули продают верфи фракций; свою верфь можно построить на базе.'}
+        </Hint>
       </Panel>
 
       <Panel
         title="Службы дока"
         actions={
           <Tag color={docked ? '#41f0c1' : undefined}>
-            {docked ? 'ДОСТУПНО' : repairService ? 'РЕМОНТ ЗАКРЫТ' : 'НУЖНА СТАНЦИЯ'}
+            {docked ? 'ДОСТУПНО' : repairService?.ok ? 'ТОЛЬКО РЕМОНТ' : 'НУЖНА СТАНЦИЯ'}
           </Tag>
         }
         tight
       >
-        <Row
-          label="Заправка"
-          value={refuelService ? refuelService.station.name : 'станции с заправкой рядом нет'}
-        />
-        <Row
-          label="Ремонт"
-          value={
-            repairService
-              ? repairService.ok
-                ? repairService.station.name
-                : repairService.reason ?? 'закрыт'
-              : 'в этой системе не ремонтируют'
-          }
-        />
-        <Row
-          label="Верфь"
-          value={yard.tier > 0 ? `${yard.label} · модули до Mk ${Math.min(3, yard.tier + 1)}` : yard.blockedReason ?? 'в этой системе верфи нет'}
-        />
+        <Row label="Заправка" value={refuelService?.station.name ?? 'станции с заправкой рядом нет'} />
+        <Row label="Ремонт" value={repairService?.station.name ?? 'в этой системе не ремонтируют'} />
         <Row label="Заправка до полного" value={refuelPrice > 0 ? cr(refuelPrice) : 'баки полны'} />
         <Row label="Ремонт корпуса и щитов" value={repairPrice > 0 ? cr(repairPrice) : 'повреждений нет'} />
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        <div className="row-actions">
           <Btn
             size="small"
             disabled={!docked || refuelPrice <= 0 || state.player.credits < refuelPrice}
@@ -293,45 +229,10 @@ export function ShipPanel({
           </Btn>
         </div>
         <Hint>
-          Модули и корпуса продают только на станциях с верфью, и только если фракция вас обслуживает. Свои «Док» и
-          «Верфь» снижают стоимость ремонта, заправки и установки модулей на вашей станции.
+          Своя станция ремонтирует и заправляет дешевле: «Док» и «Верфь» на базе снижают цену услуг и установки
+          модулей.
         </Hint>
       </Panel>
-
-      {hulls.length > 0 ? (
-        <Panel title="Корпуса на продажу" actions={<span className="dim">лимит задаёт офис флота</span>} tight>
-          {hulls.map((hull) => (
-            <div className="list-row" key={hull.typeId}>
-              <div className="list-main">
-                <b>{hull.name}</b>
-                <span className="dim">
-                  {hull.role} · {cr(hull.price)}
-                  {!hull.slotFree ? ' · флот заполнен' : ''}
-                </span>
-              </div>
-              <Btn
-                size="small"
-                kind="primary"
-                disabled={!hull.affordable || !hull.slotFree}
-                title={
-                  !hull.slotFree
-                    ? 'Достигнут лимит флота'
-                    : !hull.affordable
-                      ? 'Не хватает кредитов'
-                      : 'Купить и оставить здесь'
-                }
-                onClick={() => run((draft) => purchaseShip(draft, hull.typeId))}
-              >
-                КУПИТЬ
-              </Btn>
-            </div>
-          ))}
-          <Hint>
-            Новые корпуса приходят без модулей: поставьте буровое оборудование, прежде чем отправлять корабль в
-            пояс.
-          </Hint>
-        </Panel>
-      ) : null}
     </>
   );
 }

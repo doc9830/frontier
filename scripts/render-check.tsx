@@ -13,6 +13,9 @@ import { buildPayload, eventDef } from '../src/game/events/events.ts';
 import { travelTo } from '../src/game/actions/nav.ts';
 import { acceptContract, contractBlockedReason, contractRoute, contractsHere } from '../src/game/actions/contracts.ts';
 import { purchaseShip, hullsForSale, shipyardHere } from '../src/game/actions/outfitting.ts';
+import { loadFromStation, unloadToStation } from '../src/game/actions/trade.ts';
+import { depotAmounts, depotHere, depotRefusal } from '../src/game/sim/depots.ts';
+import { serviceAccess, stationServices } from '../src/game/data/stations.ts';
 
 import { startMining } from '../src/game/sim/mining.ts';
 import { startConstruction } from '../src/game/actions/build.ts';
@@ -20,14 +23,17 @@ import { cancelSurvey, startSurvey } from '../src/game/exploration/scan.ts';
 import { FOUNDATION_MATERIALS, stationPhase } from '../src/game/site/site.ts';
 import { chooseSite, foundStation } from '../src/game/actions/site.ts';
 import { planetKindOf } from '../src/game/data/planets.ts';
-import { serviceAccess } from '../src/game/data/stations.ts';
 import { GalaxyMap } from '../src/ui/GalaxyMap.tsx';
 import { EventModal } from '../src/ui/EventModal.tsx';
 import { Toaster } from '../src/ui/Toaster.tsx';
 import { IntroScreen } from '../src/ui/IntroScreen.tsx';
 import { StationPanel } from '../src/ui/panels/StationPanel.tsx';
 import { SystemPanel } from '../src/ui/panels/SystemPanel.tsx';
-import { ExplorePanel } from '../src/ui/panels/ExplorePanel.tsx';
+import { ResearchPanel } from '../src/ui/panels/ResearchPanel.tsx';
+import { ResourcesPanel } from '../src/ui/panels/ResourcesPanel.tsx';
+import { StationServices } from '../src/ui/panels/StationServices.tsx';
+import { StoragePanel } from '../src/ui/panels/StoragePanel.tsx';
+import { ShipyardPanel } from '../src/ui/panels/ShipyardPanel.tsx';
 import { MarketPanel } from '../src/ui/panels/MarketPanel.tsx';
 import { CargoPanel } from '../src/ui/panels/CargoPanel.tsx';
 import { ShipPanel } from '../src/ui/panels/ShipPanel.tsx';
@@ -38,15 +44,16 @@ import { SettingsPanel } from '../src/ui/panels/SettingsPanel.tsx';
 import { JumpBar } from '../src/ui/JumpBar.tsx';
 import { JumpConfirm } from '../src/ui/JumpConfirm.tsx';
 import { DEFAULT_SETTINGS } from '../src/game/settings.ts';
-import type { TabId } from '../src/ui/panels/NewsPanel.tsx';
+import type { Destination, Screen } from '../src/ui/nav.ts';
 
 let checks = 0;
 let failures = 0;
 
 const run = (_mutator: (draft: GameState) => void): void => {};
-const goTo = (_tab: TabId): void => {};
+const goTo = (_dest: Destination): void => {};
 const choose = (_choiceId: string): void => {};
 const select = (_id: string | null): void => {};
+const open = (_screen: Screen): void => {};
 const jump = (_id: string): void => {};
 const startGame = (_seed: string, _name: string): void => {};
 const resume = (): void => {};
@@ -79,12 +86,16 @@ function expect(label: string, condition: boolean, detail = ''): void {
 function renderShell(state: GameState, selectedId: string | null): void {
   render('GalaxyMap', <GalaxyMap state={state} selectedId={selectedId} onSelect={select} onJump={jump} />);
   render('StationPanel', <StationPanel state={state} run={run} />);
-  render('SystemPanel', <SystemPanel state={state} run={run} />);
-  render('SystemPanel (jump routed)', <SystemPanel state={state} run={run} onJump={noop} />);
-  render('ExplorePanel', <ExplorePanel state={state} run={run} />);
+  render('SystemPanel', <SystemPanel state={state} run={run} onOpen={open} />);
+  render('SystemPanel (jump routed)', <SystemPanel state={state} run={run} onJump={noop} onOpen={open} />);
+  render('ResearchPanel', <ResearchPanel state={state} run={run} onOpen={open} />);
+  render('ResourcesPanel', <ResourcesPanel state={state} run={run} onOpen={open} />);
+  render('StationServices', <StationServices state={state} run={run} onOpen={open} />);
+  render('StoragePanel', <StoragePanel state={state} run={run} onOpen={open} />);
+  render('ShipyardPanel', <ShipyardPanel state={state} run={run} />);
   render('MarketPanel', <MarketPanel state={state} run={run} />);
-  render('CargoPanel', <CargoPanel state={state} run={run} />);
-  render('ShipPanel', <ShipPanel state={state} run={run} />);
+  render('CargoPanel', <CargoPanel state={state} run={run} onOpen={open} />);
+  render('ShipPanel', <ShipPanel state={state} run={run} onOpen={open} />);
   render('FleetPanel', <FleetPanel state={state} run={run} />);
   render('ContractsPanel', <ContractsPanel state={state} run={run} />);
   render('NewsPanel', <NewsPanel state={state} onGoTo={goTo} />);
@@ -193,7 +204,7 @@ ship.cargo = { ore: 12, food: 4 };
 const board = contractsHere(state);
 if (board[0]) console.log(`  info contract accepted: ${acceptContract(state, board[0].id)}`);
 renderShell(state, neighbour);
-render('ShipPanel (cargo loaded)', <ShipPanel state={state} run={run} />);
+render('ShipPanel (cargo loaded)', <ShipPanel state={state} run={run} onOpen={open} />);
 
 // Верфь и курсорские доски проверяем там, где доки и доска реально есть.
 const dockSystemId = ship.systemId;
@@ -206,7 +217,7 @@ const yardSystem = state.systemIds
   );
 if (yardSystem) {
   ship.systemId = yardSystem.id;
-  const yardView = render('ShipPanel (at a shipyard)', <ShipPanel state={state} run={run} />);
+  const yardView = render('ShipyardPanel (at a shipyard)', <ShipyardPanel state={state} run={run} />);
   const yard = shipyardHere(state, ship);
   console.log(`  info shipyard: ${yard.label} (${yard.source})`);
   expect('ship panel names the shipyard at work', yardView.includes('модули до Mk'), yard.label);
@@ -241,7 +252,7 @@ if (courierSystem) {
   );
   if (courierOffer) {
     console.log(`  info courier accepted: ${acceptContract(state, courierOffer.id)}`);
-    const sealedView = render('ShipPanel (sealed cargo)', <ShipPanel state={state} run={run} />);
+    const sealedView = render('ShipPanel (sealed cargo)', <ShipPanel state={state} run={run} onOpen={open} />);
     expect(
       'sealed contract cargo is shown in the hold',
       sealedView.includes('Опечатанный груз'),
@@ -260,9 +271,9 @@ if (courierSystem) {
 ship.systemId = dockSystemId;
 render('FleetPanel (two hulls)', <FleetPanel state={state} run={run} />);
 render('StationPanel (build running)', <StationPanel state={state} run={run} />);
-const cargoView = render('CargoPanel (ore in hold)', <CargoPanel state={state} run={run} />);
-expect('cargo panel names the hold', cargoView.includes('Трюм корабля'));
-expect('cargo panel names the station storage', cargoView.includes('Склад станции'));
+const cargoView = render('CargoPanel (ore in hold)', <CargoPanel state={state} run={run} onOpen={open} />);
+expect('cargo panel names the hold', cargoView.includes('Трюм'));
+expect('cargo panel names the storage next door', cargoView.includes('Склад'));
 expect('cargo panel explains the loop', cargoView.includes('Как это устроено'));
 expect('cargo panel shows the mined resource by name', cargoView.includes('Руда'));
 
@@ -357,10 +368,10 @@ if (belt) {
   if (freshBelt) freshBelt.discovered = false;
   ship.status = 'docked';
   ship.mission = null;
-  render('ExplorePanel (survey idle)', <ExplorePanel state={state} run={run} />);
+  render('ResearchPanel (survey idle)', <ResearchPanel state={state} run={run} onOpen={open} />);
   if (freshBelt) {
     console.log(`  info survey started: ${startSurvey(state, 'belt', { beltId: freshBelt.id })}`);
-    const surveying = render('ExplorePanel (survey running)', <ExplorePanel state={state} run={run} />);
+    const surveying = render('ResearchPanel (survey running)', <ResearchPanel state={state} run={run} onOpen={open} />);
     expect('explore panel shows survey progress', surveying.includes('progress-fill'));
     expect('explore panel offers a cancel', surveying.includes('ПРЕРВАТЬ СКАН'));
     expect('surveying blocks mining', startMining(state, ship, freshBelt.id) === false);
@@ -369,14 +380,68 @@ if (belt) {
     console.log(`  info survey cancelled: ${state.survey === null}`);
   }
   console.log(`  info mining started: ${startMining(state, ship, belt.id)}`);
-  const mining = render('SystemPanel (mining)', <SystemPanel state={state} run={run} />);
+  const mining = render('ResourcesPanel (mining)', <ResourcesPanel state={state} run={run} onOpen={open} />);
   expect('mining panel shows the stint progress', mining.includes('progress-fill'));
   expect('mining panel offers the stop button', mining.includes('ОСТАНОВИТЬ ДОБЫЧУ'));
   expect('mining panel reports free cargo', mining.includes('Свободный трюм'));
   expect('mining panel reports the belt reserve', mining.includes('Запас пояса'));
-  render('ShipPanel (mining)', <ShipPanel state={state} run={run} />);
+  render('ShipPanel (mining)', <ShipPanel state={state} run={run} onOpen={open} />);
 }
 expect('event definitions stay addressable', !!eventDef('pirate_encounter'));
+
+// --------------------------------------------------------------- склады по станциям
+console.log('\n[6] per-station depots');
+{
+  const ship = playerShip(state);
+  ship.travel = null;
+  ship.status = 'docked';
+  ship.mission = null;
+  // Ничейная система без станций: держать груз негде.
+  const empty = state.systemIds
+    .map((id) => state.systems[id])
+    .find((sys) => sys.stations.length === 0 && sys.id !== state.station.systemId);
+  // Система со станцией фракции, готовой принять груз на хранение.
+  const host = state.systemIds
+    .map((id) => state.systems[id])
+    .find(
+      (sys) =>
+        sys.id !== state.station.systemId &&
+        sys.stations.some((station) => !!station.factionId && stationServices(station).storage),
+    );
+
+  if (empty) {
+    ship.systemId = empty.id;
+    expect('no station means no depot', depotHere(state) === null, depotRefusal(state) ?? '');
+  }
+
+  if (host) {
+    ship.systemId = host.id;
+    const depot = depotHere(state);
+    expect('a station offers its warehouse', !!depot, depot ? `${depot.name} — ${depot.capacity} ед.` : 'none');
+    if (depot) {
+      ship.cargo = { ore: 20 };
+      const moved = unloadToStation(state, null);
+      expect('hold unloads into the rented cells', moved === 20, `${moved} ед.`);
+      const stored = depotAmounts(state, depot.id).ore ?? 0;
+      expect('rented goods sit in the station depot', stored === 20, `${stored} ед. ore`);
+      expect(
+        'the home warehouse is untouched',
+        depot.own ? true : (state.station.storage.ore ?? 0) === 0,
+        `${state.station.storage.ore ?? 0} ore at home`,
+      );
+      const loaded = loadFromStation(state, 'ore', 5);
+      expect('goods can be loaded back from the same station', loaded === 5, `${loaded} ед.`);
+      const panel = render('StoragePanel (rented depot)', <StoragePanel state={state} run={run} onOpen={open} />);
+      expect('storage panel names the depot', panel.includes(depot.name));
+      expect('storage panel lists the goods', panel.includes('Содержимое склада') && panel.includes('Руда'));
+      const hub = render('StationServices (station menu)', <StationServices state={state} run={run} onOpen={open} />);
+      expect('station menu offers storage as a tile', hub.includes('СКЛАД'));
+      expect('station menu lists the services of the station', hub.includes('Услуги'));
+    }
+  } else {
+    console.log('  skip no charted station with storage');
+  }
+}
 
 console.log(`\n${checks - failures}/${checks} renders/checks passed, ${failures} failed.`);
 if (failures > 0) throw new Error(`${failures} render check(s) failed.`);

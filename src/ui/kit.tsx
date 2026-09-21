@@ -50,6 +50,43 @@ export function Btn({
   );
 }
 
+/**
+ * Крупная кнопка-раздел внутри вкладки: «Исследование», «Рынок», «Верфь».
+ * На телефоне она должна нажиматься пальцем, поэтому у неё своя высота и подпись.
+ */
+export function Tile({
+  label,
+  hint,
+  onClick,
+  disabled,
+  title,
+  tone,
+  note,
+}: {
+  label: string;
+  hint?: string;
+  onClick?: () => void;
+  disabled?: boolean;
+  title?: string;
+  tone?: 'primary' | 'good' | 'bad';
+  note?: string;
+}) {
+  const classes = ['tile'];
+  if (tone) classes.push(tone);
+  return (
+    <button type="button" className={classes.join(' ')} onClick={onClick} disabled={disabled} title={title}>
+      <b>{label}</b>
+      {hint ? <span>{hint}</span> : null}
+      {note ? <span className="tile-note">{note}</span> : null}
+    </button>
+  );
+}
+
+/** Сетка крупных кнопок: держит одинаковые отступы на всех экранах. */
+export function Hub({ children }: { children: ReactNode }) {
+  return <div className="hub">{children}</div>;
+}
+
 export function Row({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className="row">
