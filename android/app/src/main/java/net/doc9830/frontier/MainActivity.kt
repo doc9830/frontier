@@ -90,12 +90,12 @@ class MainActivity : Activity() {
     private fun buildAssetLoader(): WebViewAssetLoader.Builder {
         val builder = WebViewAssetLoader.Builder()
         // A downloaded bundle shadows the copy shipped inside the APK; when a file
-        // is missing there, the asset handler answers instead.
+        // is missing there, the bundled handler answers instead.
         val live = WebBundle.liveDir(this)
         if (live.isDirectory) {
             builder.addPathHandler("/", WebViewAssetLoader.InternalStoragePathHandler(this, live))
         }
-        builder.addPathHandler("/", WebViewAssetLoader.AssetsPathHandler(this))
+        builder.addPathHandler("/", WebAssetHandler(this))
         return builder
     }
 
