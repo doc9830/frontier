@@ -46,7 +46,7 @@ writeFileSync(pkgFile, `${JSON.stringify(pkg, null, 2)}\n`);
 
 const tag = `v${manifest.version}`;
 const webBundle = join(root, 'build', 'frontier-web.zip');
-const apk = join(root, 'build', `frontier-${manifest.version}-release.apk`);
+const apk = join(root, 'build', `frontier-${manifest.version}.apk`);
 console.log(`release ${tag} (code ${manifest.versionCode})`);
 
 if (!skipBuild) {

@@ -58,7 +58,7 @@ JAVA_HOME=/path/to/jdk ./gradlew assembleRelease
 ## Установка на телефон
 
 ```bash
-adb install -r build/frontier-<версия>-release.apk
+adb install -r build/frontier-<версия>.apk
 ```
 
 Первая установка — вручную (ADB или файл APK). Дальше обновления приходят сами:

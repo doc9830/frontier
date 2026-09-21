@@ -63,7 +63,9 @@ if (!existsSync(apk)) {
 
 function copy(from) {
   const version = JSON.parse(readFileSync(join(root, 'version.json'), 'utf8')).version;
-  const target = join(root, 'build', `frontier-${version}-${variant}.apk`);
+  // Release builds keep the plain name: it becomes the asset name on GitHub.
+  const suffix = variant === 'release' ? '' : `-${variant}`;
+  const target = join(root, 'build', `frontier-${version}${suffix}.apk`);
   mkdirSync(dirname(target), { recursive: true });
   copyFileSync(from, target);
   console.log(`apk      ${target}`);

@@ -112,7 +112,6 @@ class MainActivity : Activity() {
         with(view.settings) {
             javaScriptEnabled = true
             domStorageEnabled = true // the save game lives in localStorage
-            databaseEnabled = true
             allowFileAccess = false
             allowContentAccess = false
             setSupportZoom(false)
@@ -213,8 +212,11 @@ class MainActivity : Activity() {
                 }
             }
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            window.setDecorFitsSystemWindows(Build.VERSION.SDK_INT >= 35)
+        if (Build.VERSION.SDK_INT >= 35) {
+            // Android 15 draws every app edge to edge; the game reads its own
+            // env(safe-area-inset-*) values, so the content must not be inset here.
+            @Suppress("DEPRECATION")
+            window.setDecorFitsSystemWindows(false)
         }
     }
 
