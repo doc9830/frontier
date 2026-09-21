@@ -4,6 +4,7 @@ import { FIELD } from '../game/universe/generate.ts';
 import { archetypeLabel } from '../game/universe/generate.ts';
 import { findPath } from '../game/exploration/travel.ts';
 import { jumpPlan } from '../game/actions/nav.ts';
+import { travelProgress } from '../game/sim/travel.ts';
 import { playerShip } from '../game/state/create.ts';
 import { factionView } from '../game/factions/reputation.ts';
 import { cr, duration, riskText, threatColor } from './format.ts';
@@ -35,11 +36,14 @@ export function GalaxyMap({
   selectedId,
   onSelect,
   onJump,
+  animations = true,
 }: {
   state: GameState;
   selectedId: string | null;
   onSelect: (id: string | null) => void;
   onJump: (id: string) => void;
+  /** Настройка «анимация прыжка»: без неё корабль всё равно виден, но не едет плавно. */
+  animations?: boolean;
 }) {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const drag = useRef<{ active: boolean; lastX: number; lastY: number }>({
@@ -113,6 +117,35 @@ export function GalaxyMap({
     if (!selected || !selected.discovered || !currentId) return [] as string[];
     return findPath(state, currentId, selected.id);
   }, [state, selected, currentId]);
+
+  /**
+   * Перелёт виден прямо на карте: маршрут подсвечен, а корабль ползёт по линии
+   * от системы к системе. Прогресс берётся из симуляции, так что анимация не
+   * врёт: когда полоса дошла до конца, корабль действительно прибыл.
+   */
+  const travel = ship?.travel ?? null;
+  const route = useMemo(() => {
+    if (!travel) return [] as { x: number; y: number }[];
+    return travel.path
+      .map((id) => state.systems[id]?.position)
+      .filter((point): point is { x: number; y: number } => Boolean(point));
+  }, [travel, state.systems]);
+
+  const warp = useMemo(() => {
+    if (!travel || !ship || route.length < 2) return null;
+    const span = route.length - 1;
+    const travelled = Math.min(span, Math.max(0, travelProgress(state, ship) * span));
+    const index = Math.min(span - 1, Math.floor(travelled));
+    const from = route[index];
+    const to = route[index + 1];
+    const local = travelled - index;
+    const point = { x: from.x + (to.x - from.x) * local, y: from.y + (to.y - from.y) * local };
+    const trail = route
+      .slice(0, index + 1)
+      .map((step) => `${step.x},${step.y}`)
+      .join(' ');
+    return { point, trail: `${trail} ${point.x},${point.y}` };
+  }, [travel, route, ship, state]);
 
   const toViewBox = (clientX: number, clientY: number): { x: number; y: number } => {
     const svg = svgRef.current;
@@ -340,6 +373,25 @@ export function GalaxyMap({
               </g>
             );
           })}
+
+          {warp ? (
+            <g className={animations ? 'warp' : 'warp still'} pointerEvents="none">
+              <polyline
+                className="warp-route"
+                points={route.map((step) => `${step.x},${step.y}`).join(' ')}
+                fill="none"
+                stroke="#41f0c1"
+                strokeWidth={2.4}
+                strokeDasharray="8 7"
+                opacity={0.65}
+              />
+              <polyline points={warp.trail} fill="none" stroke="#ffb347" strokeWidth={2.6} opacity={0.9} />
+              <g className="warp-marker" style={{ transform: `translate(${warp.point.x}px, ${warp.point.y}px)` }}>
+                <circle className="warp-pulse" r={12} fill="none" stroke="#41f0c1" strokeWidth={1.4} />
+                <circle r={5.5} fill="#41f0c1" stroke="#04090d" strokeWidth={1.6} />
+              </g>
+            </g>
+          ) : null}
         </g>
       </svg>
 

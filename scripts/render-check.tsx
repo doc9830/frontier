@@ -27,6 +27,10 @@ import { ShipPanel } from '../src/ui/panels/ShipPanel.tsx';
 import { FleetPanel } from '../src/ui/panels/FleetPanel.tsx';
 import { ContractsPanel } from '../src/ui/panels/ContractsPanel.tsx';
 import { NewsPanel } from '../src/ui/panels/NewsPanel.tsx';
+import { SettingsPanel } from '../src/ui/panels/SettingsPanel.tsx';
+import { JumpBar } from '../src/ui/JumpBar.tsx';
+import { JumpConfirm } from '../src/ui/JumpConfirm.tsx';
+import { DEFAULT_SETTINGS } from '../src/game/settings.ts';
 import type { TabId } from '../src/ui/panels/NewsPanel.tsx';
 
 let checks = 0;
@@ -39,6 +43,7 @@ const select = (_id: string | null): void => {};
 const jump = (_id: string): void => {};
 const startGame = (_seed: string, _name: string): void => {};
 const resume = (): void => {};
+const noop = (): void => {};
 
 function render(label: string, element: ReactElement, minChars = 60): string {
   checks += 1;
@@ -68,6 +73,7 @@ function renderShell(state: GameState, selectedId: string | null): void {
   render('GalaxyMap', <GalaxyMap state={state} selectedId={selectedId} onSelect={select} onJump={jump} />);
   render('StationPanel', <StationPanel state={state} run={run} />);
   render('SystemPanel', <SystemPanel state={state} run={run} />);
+  render('SystemPanel (jump routed)', <SystemPanel state={state} run={run} onJump={noop} />);
   render('MarketPanel', <MarketPanel state={state} run={run} />);
   render('CargoPanel', <CargoPanel state={state} run={run} />);
   render('ShipPanel', <ShipPanel state={state} run={run} />);
@@ -76,6 +82,19 @@ function renderShell(state: GameState, selectedId: string | null): void {
   render('NewsPanel', <NewsPanel state={state} onGoTo={goTo} />);
   render('Toaster', <Toaster state={state} />, state.toast ? 60 : 20);
   render('EventModal', <EventModal state={state} onChoose={choose} />, state.pendingEvent ? 60 : 0);
+  render(
+    'SettingsPanel',
+    <SettingsPanel
+      state={state}
+      settings={DEFAULT_SETTINGS}
+      paused={false}
+      onTogglePause={noop}
+      onChange={noop}
+      onReset={noop}
+      onSave={noop}
+    />,
+  );
+  render('JumpBar', <JumpBar state={state} paused={false} onCancel={noop} />, 0);
 }
 
 
@@ -106,6 +125,30 @@ renderShell(state, null);
 expect('map draws charted systems', docked.includes(state.systems[ship.systemId].name));
 expect('map draws its lanes', (docked.match(/<line/g) ?? []).length > 0);
 console.log(`  info charted systems: ${state.systemIds.filter((id) => state.systems[id].discovered).length}`);
+
+// settings tab: pause, speed, jump animation, update card
+const settingsHtml = render(
+  'SettingsPanel (paused)',
+  <SettingsPanel
+    state={state}
+    settings={{ ...DEFAULT_SETTINGS, speed: 2, confirmJump: true }}
+    paused
+    onTogglePause={noop}
+    onChange={noop}
+    onReset={noop}
+    onSave={noop}
+  />,
+);
+expect('settings offer the pause toggle', settingsHtml.includes('ПРОДОЛЖИТЬ'));
+expect('settings offer the time multiplier', settingsHtml.includes('×2'));
+expect('settings carry the app summary', settingsHtml.includes('Ключ галактики'));
+const confirm = render(
+  'JumpConfirm',
+  <JumpConfirm state={state} targetId={neighbour ?? ship.systemId} onConfirm={noop} onCancel={noop} />,
+  20,
+);
+expect('jump confirmation quotes the fuel', confirm.includes('Топливо'));
+expect('jump confirmation can be cancelled', confirm.includes('ОТМЕНА'));
 
 // --------------------------------------------------------------- busy shell
 console.log('\n[3] shell with jobs running');
@@ -139,6 +182,22 @@ console.log('\n[4] in transit with a pending event');
 if (neighbour) {
   console.log(`  info jumped out: ${travelTo(state, neighbour)}`);
   renderShell(state, neighbour);
+  const destId = ship.travel?.path[ship.travel.path.length - 1] ?? '';
+  const destName = state.systems[destId]?.name ?? '';
+  const transitMap = render(
+    'GalaxyMap (in transit)',
+    <GalaxyMap state={state} selectedId={null} animations onSelect={select} onJump={jump} />,
+  );
+  expect('map draws the ship running along the lane', transitMap.includes('warp-marker'));
+  expect('map highlights the jump route', transitMap.includes('warp-route'));
+  const stillMap = render(
+    'GalaxyMap (animation off)',
+    <GalaxyMap state={state} selectedId={null} animations={false} onSelect={select} onJump={jump} />,
+  );
+  expect('jump animation can be switched off', stillMap.includes('warp still'));
+  const bar = render('JumpBar (in transit)', <JumpBar state={state} paused={false} onCancel={noop} />, 40);
+  expect('jump bar reports progress', bar.includes('осталось'));
+  expect('jump bar names the destination', !!destName && bar.includes(destName));
   state.pendingEvent = {
     id: 'render:1',
     eventId: 'pirate_encounter',

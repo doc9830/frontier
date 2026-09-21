@@ -13,6 +13,9 @@
   --bad: #ff6b6b;
   --good: #7ef7b0;
   --mono: 'JetBrains Mono', 'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace;
+  /* Низ верхней панели в пикселях: его пересчитывает шапка, чтобы нижний лист
+     никогда не заезжал под HUD. Значение ниже — для случая «шапки ещё нет». */
+  --hud-bottom: 54px;
 }
 
 * {
@@ -134,6 +137,9 @@ select {
 }
 
 .sidescroll {
+  /* Растягивается и прокручивается только содержимое раздела: ряд вкладок выше
+     не отдаёт высоту, иначе длинные панели подрезают его подписи. */
+  flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
   padding: 10px;
@@ -148,6 +154,7 @@ select {
   padding: 6px 8px 0;
   border-bottom: 1px solid var(--line);
   overflow-x: auto;
+  flex: 0 0 auto;
 }
 
 .tab {
@@ -613,6 +620,159 @@ input.text {
   white-space: nowrap;
 }
 
+/* ------------------------------------------- pause button, jump bar, chips */
+
+.pause-btn {
+  flex: 0 0 auto;
+  width: 38px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line);
+  background: linear-gradient(180deg, #102a34, #0a1c24);
+  color: var(--accent);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.pause-btn:hover {
+  border-color: var(--accent);
+}
+
+.pause-btn.on {
+  border-color: var(--amber);
+  color: var(--amber);
+  background: linear-gradient(180deg, #2a2113, #171107);
+}
+
+/* Пока идёт перелёт, вторая строка верхней панели показывает его прогресс. */
+.jumpbar {
+  flex: 1 1 100%;
+  width: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--line-soft);
+  font-size: 11px;
+}
+
+.jumpbar b {
+  color: var(--accent);
+  letter-spacing: 0.16em;
+}
+
+.jumpbar-text {
+  flex: 1 1 160px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--dim);
+}
+
+.jumpbar-track {
+  flex: 1 1 90px;
+  height: 6px;
+  min-width: 60px;
+  background: #0a1a22;
+  border: 1px solid var(--line-soft);
+  overflow: hidden;
+}
+
+.jumpbar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #41f0c1, #ffb347);
+  transition: width 0.25s linear;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.chip {
+  padding: 4px 9px;
+  border: 1px solid var(--line-soft);
+  background: rgba(8, 23, 32, 0.6);
+  color: var(--dim);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.chip:hover {
+  color: var(--text);
+}
+
+.chip.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: rgba(65, 240, 193, 0.08);
+}
+
+/* --- jump animation on the map -------------------------------------------- */
+
+.warp-route {
+  animation: warp-flow 2.4s linear infinite;
+}
+
+.warp-marker {
+  transition: transform 0.26s linear;
+}
+
+.warp-pulse {
+  animation: warp-pulse 1.5s ease-out infinite;
+}
+
+.warp.still .warp-route,
+.warp.still .warp-pulse {
+  animation: none;
+}
+
+.warp.still .warp-marker {
+  transition: none;
+}
+
+@keyframes warp-flow {
+  from {
+    stroke-dashoffset: 0;
+  }
+  to {
+    stroke-dashoffset: -60;
+  }
+}
+
+@keyframes warp-pulse {
+  0% {
+    opacity: 0.85;
+    r: 6;
+  }
+  100% {
+    opacity: 0;
+    r: 22;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .warp-route,
+  .warp-pulse {
+    animation: none;
+  }
+
+  .warp-marker {
+    transition: none;
+  }
+}
+
 /* ---------------------------------------------------------------- meters */
 
 .meter {
@@ -752,6 +912,16 @@ input {
 
   .tab {
     padding: 9px 12px;
+  }
+
+  .chip {
+    min-height: 30px;
+    padding: 6px 10px;
+  }
+
+  .pause-btn {
+    width: 44px;
+    min-height: 32px;
   }
 }
 
@@ -988,6 +1158,19 @@ input {
     background: none;
     cursor: pointer;
   }
+
+  /* --- статус-бар прыжка во второй строке плавающего HUD ------------------ */
+
+  .jumpbar {
+    gap: 4px 8px;
+    padding-top: 5px;
+    font-size: 10px;
+  }
+
+  .jumpbar-text {
+    order: -1;
+    flex: 1 1 100%;
+  }
 }
 
 /* ------------------------------------------------------ panel bottom sheet */
@@ -1000,6 +1183,9 @@ input {
     bottom: 0;
     z-index: 44;
     max-height: 78vh;
+    /* Никогда не залезает под верхнюю панель: её высоту отдаёт --hud-bottom. */
+    max-height: calc(100vh - var(--hud-bottom, 54px) - 10px);
+    max-height: calc(100dvh - var(--hud-bottom, 54px) - 10px);
     border-top: 1px solid var(--accent);
     background: linear-gradient(180deg, #081720, #04090d);
     box-shadow: 0 -18px 40px rgba(0, 0, 0, 0.6);
@@ -1014,6 +1200,9 @@ input {
 
   .sheet-head {
     position: relative;
+    /* Заголовок и ряд вкладок не сжимаются: раньше длинная панель (РЫНОК, КОРАБЛЬ)
+       выдавливала их из листа, и верхняя строка с выбором оказывалась срезанной. */
+    flex: 0 0 auto;
     display: flex;
     align-items: center;
     gap: 8px;
@@ -1053,10 +1242,13 @@ input {
   }
 
   .tabs {
+    /* wrap — все разделы видны целиком: раньше последние кнопки уезжали вбок
+       за край прокрутки, а длинная панель ещё и подрезала сами подписи. */
     padding: 8px 8px 0;
     gap: 4px;
     border-bottom: none;
-    flex-wrap: nowrap;
+    flex-wrap: wrap;
+    overflow: visible;
   }
 
   .tab {
@@ -1089,6 +1281,7 @@ input {
   }
 
   .sheet-menu {
+    flex: 1 1 auto;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 6px;
     min-height: 0;

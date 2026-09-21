@@ -20,7 +20,8 @@ export type TabId =
   | 'station'
   | 'fleet'
   | 'contracts'
-  | 'news';
+  | 'news'
+  | 'settings';
 
 export function NewsPanel({
   state,

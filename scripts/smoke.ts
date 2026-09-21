@@ -42,6 +42,7 @@ import { hullsForSale, moduleOffers, purchaseShip, shipResaleValue } from '../sr
 import { fleetCap, missionSlots } from '../src/game/sim/fleet.ts';
 import { storageCapacity, storageUsed } from '../src/game/sim/station.ts';
 import { formatGameTime, gameDay } from '../src/game/news/news.ts';
+import { DEFAULT_SETTINGS, clampSpeed, loadSettings, normalizeSettings, tickSeconds } from '../src/game/settings.ts';
 
 let checks = 0;
 let failures = 0;
@@ -347,6 +348,22 @@ check('event left the ship in a known state', ['docked', 'transit', 'mining'].in
 check('combat resolved without NaN', Number.isFinite(raidShip.hull) && Number.isFinite(raidShip.shield));
 check('event produced feedback for the player', !!raid.news[0], raid.news[0]?.text.slice(0, 60));
 console.log(`  info hull ${hullBefore} → ${Math.round(raidShip.hull)}, news ${raid.news.length} items, toasts ${raid.toast ? 'yes' : 'no'}`);
+
+// --------------------------------------------------------------- app settings
+console.log('\n[10] app settings and pause');
+const defaults = loadSettings();
+check('settings fall back to defaults without storage', defaults.speed === 1 && defaults.animations);
+check('every default key is present', (Object.keys(DEFAULT_SETTINGS) as string[]).every((key) => key in defaults));
+check('broken settings blob is repaired', normalizeSettings({ speed: 'fast', toasts: 'yes' }).speed === 1);
+check('unknown settings keys are dropped', !('nope' in normalizeSettings({ nope: 1 })));
+check(
+  'speed stays inside sane bounds',
+  clampSpeed(100) === 8 && clampSpeed(0) === 0.25 && clampSpeed(Number.NaN) === 1,
+  `100→${clampSpeed(100)}, 0→${clampSpeed(0)}`,
+);
+check('pause freezes the simulation step', tickSeconds(2.5, defaults, true) === 0);
+check('time multiplier scales the step', tickSeconds(2, { ...defaults, speed: 4 }, false) === 8);
+check('a negative frame never rewinds time', tickSeconds(-5, defaults, false) === 0);
 
 console.log(`\n${checks - failures}/${checks} checks passed, ${failures} failed.`);
 if (failures > 0) throw new Error(`${failures} smoke check(s) failed.`);

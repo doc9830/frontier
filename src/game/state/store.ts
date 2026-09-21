@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { GameState } from '../types.ts';
+import { DEFAULT_SETTINGS, loadSettings, normalizeSettings, saveSettings, tickSeconds } from '../settings.ts';
+import type { AppSettings } from '../settings.ts';
 import { advance, catchUp, resolvePendingEvent } from '../sim/engine.ts';
 import { clearToast } from '../sim/toast.ts';
 import { hasSave, loadGame, offlineSeconds, saveGame, startNewGame } from '../save.ts';
@@ -19,12 +21,19 @@ const TOAST_MS = 4200;
 export interface GameStore {
   state: GameState | null;
   offlineReport: string | null;
+  /** Настройки приложения: темп времени, анимация, подтверждения, автосохранение. */
+  settings: AppSettings;
+  /** Мир на паузе: время, перелёты и стройка стоят. */
+  paused: boolean;
   /** Runs a mutation and refreshes the UI. */
   act: (mutator: (state: GameState) => void) => void;
   resolveEvent: (choiceId: string) => void;
   save: () => void;
   newGame: (seed: string, playerName?: string) => void;
   continueGame: () => void;
+  togglePause: () => void;
+  updateSettings: (patch: Partial<AppSettings>) => void;
+  resetSettings: () => void;
   hasExistingSave: boolean;
 }
 
@@ -39,8 +48,15 @@ function describeOffline(seconds: number): string {
 export function useGame(): GameStore {
   const [state, setState] = useState<GameState | null>(null);
   const [offlineReport, setOfflineReport] = useState<string | null>(null);
+  const [settings, setSettings] = useState<AppSettings>(loadSettings);
+  const [paused, setPaused] = useState(false);
   const stateRef = useRef<GameState | null>(null);
   stateRef.current = state;
+  // The tick timer is created once, so the loop reads the live values from refs.
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
+  const pausedRef = useRef(paused);
+  pausedRef.current = paused;
 
   const act = useCallback((mutator: (target: GameState) => void) => {
     setState((prev) => {
@@ -77,6 +93,21 @@ export function useGame(): GameStore {
 
   const continueGame = useCallback(() => load(true), [load]);
 
+  const updateSettings = useCallback((patch: Partial<AppSettings>) => {
+    setSettings((prev) => {
+      const next = normalizeSettings({ ...prev, ...patch });
+      saveSettings(next);
+      return next;
+    });
+  }, []);
+
+  const resetSettings = useCallback(() => {
+    setSettings({ ...DEFAULT_SETTINGS });
+    saveSettings({ ...DEFAULT_SETTINGS });
+  }, []);
+
+  const togglePause = useCallback(() => setPaused((prev) => !prev), []);
+
   const resolveEvent = useCallback(
     (choiceId: string) => {
       act((draft) => resolvePendingEvent(draft, choiceId));
@@ -95,7 +126,9 @@ export function useGame(): GameStore {
       const now = Date.now();
       const seconds = Math.min(MAX_TICK_SECONDS, (now - last) / 1000);
       last = now;
-      if (seconds > 0.02) act((draft) => advance(draft, seconds));
+      // Пауза не двигает мир вовсе: ни лишних перерисовок, ни расхода батареи.
+      const step = tickSeconds(seconds, settingsRef.current, pausedRef.current);
+      if (step > 0.02) act((draft) => advance(draft, step));
     }, TICK_MS);
     return () => window.clearInterval(id);
   }, [active, act]);
@@ -110,7 +143,7 @@ export function useGame(): GameStore {
 
   // --- autosave ------------------------------------------------------------
   useEffect(() => {
-    if (!active) return;
+    if (!active || !settings.autosave) return;
     const id = window.setInterval(() => save(), AUTOSAVE_MS);
     const onLeave = (): void => save();
     window.addEventListener('beforeunload', onLeave);
@@ -119,9 +152,23 @@ export function useGame(): GameStore {
       window.removeEventListener('beforeunload', onLeave);
       save();
     };
-  }, [active, save]);
+  }, [active, save, settings.autosave]);
 
   const hasExistingSave = hasSave();
 
-  return { state, offlineReport, act, resolveEvent, save, newGame, continueGame, hasExistingSave };
+  return {
+    state,
+    offlineReport,
+    settings,
+    paused,
+    act,
+    resolveEvent,
+    save,
+    newGame,
+    continueGame,
+    togglePause,
+    updateSettings,
+    resetSettings,
+    hasExistingSave,
+  };
 }

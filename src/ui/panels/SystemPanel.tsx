@@ -28,9 +28,12 @@ export function stationTypeLabel(type: string): string {
 export function SystemPanel({
   state,
   run,
+  onJump,
 }: {
   state: GameState;
   run: (mutator: (draft: GameState) => void) => void;
+  /** Оболочка может перехватить прыжок (подтверждение из настроек). */
+  onJump?: (id: string) => void;
 }) {
   const ship = playerShip(state);
   const system = ship ? state.systems[ship.systemId] : null;
@@ -145,7 +148,7 @@ export function SystemPanel({
                   kind={affordable ? 'primary' : undefined}
                   disabled={!affordable || !!ship.travel || ship.status === 'mining'}
                   title={affordable ? 'Прыгнуть в эту систему' : 'Не хватает топлива (или корабль занят)'}
-                  onClick={() => run((draft) => travelTo(draft, target.id))}
+                  onClick={() => (onJump ? onJump(target.id) : run((draft) => travelTo(draft, target.id)))}
                 >
                   ПРЫЖОК
                 </Btn>

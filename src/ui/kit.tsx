@@ -102,6 +102,64 @@ export function Hint({ children }: { children: ReactNode }) {
   return <div className="dim">{children}</div>;
 }
 
+/** Переключатель «вкл/выкл» для панели настроек. */
+export function Toggle({
+  label,
+  value,
+  onChange,
+  hint,
+}: {
+  label: string;
+  value: boolean;
+  onChange: (value: boolean) => void;
+  hint?: string;
+}) {
+  return (
+    <div className="row">
+      <span>
+        {label}
+        {hint ? <span className="dim"> · {hint}</span> : null}
+      </span>
+      <button
+        type="button"
+        className={value ? 'chip active' : 'chip'}
+        role="switch"
+        aria-checked={value}
+        onClick={() => onChange(!value)}
+      >
+        {value ? 'ВКЛ' : 'ВЫКЛ'}
+      </button>
+    </div>
+  );
+}
+
+/** Ряд взаимоисключающих вариантов (скорость времени, режимы). */
+export function Chips<T extends string | number>({
+  options,
+  value,
+  onChange,
+}: {
+  options: { value: T; label: string; hint?: string }[];
+  value: T;
+  onChange: (value: T) => void;
+}) {
+  return (
+    <div className="chips">
+      {options.map((option) => (
+        <button
+          key={String(option.value)}
+          type="button"
+          className={option.value === value ? 'chip active' : 'chip'}
+          title={option.hint}
+          onClick={() => onChange(option.value)}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export function Tag({ children, color }: { children: ReactNode; color?: string }) {
   return (
     <span className="tag" style={color ? { color, borderColor: color } : undefined}>
