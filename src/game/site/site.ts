@@ -3,6 +3,7 @@ import type { PlanetBonusKind, PlanetKindDef } from '../data/planets.ts';
 import { planetKindOf, planetBonusText, sitePlanetScore } from '../data/planets.ts';
 import { buildingDef, buildingTime, totalSlots } from '../data/buildings.ts';
 import { findPath } from '../exploration/travel.ts';
+import { stationPhaseOf } from '../sim/station.ts';
 
 /**
  * Участок под собственную станцию.
@@ -96,8 +97,14 @@ export function localSiteCandidate(state: GameState): SiteCandidate | null {
   return systemSiteCandidate(state, system);
 }
 
+/**
+ * Стадия станции. Источник правды — постройки, а не поле `phase`: у сейвов 0.1.x
+ * этого поля не было, а база со складом уже стояла, и без вывода стадии из
+ * построек такая станция навсегда оставалась «участком» — склад не принимал груз,
+ * а командный центр не открывался.
+ */
 export function stationPhase(state: GameState): StationPhase {
-  return state.station.phase ?? 'operational';
+  return stationPhaseOf(state.station);
 }
 
 export function stationPhaseLabel(phase: StationPhase): string {

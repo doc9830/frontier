@@ -16,6 +16,23 @@ const url = process.argv[2] ?? 'http://127.0.0.1:4173/';
 const CHROME = process.env.CHROME ?? 'google-chrome';
 const PORT = 9333;
 
+/**
+ * Мост оболочки Android: тем же именем и тем же набором вызовов пользуется APK
+ * (см. MainActivity.kt и src/platform/android.ts). Подставляется до запуска игры,
+ * чтобы страница считала себя внутри приложения.
+ */
+const SHELL_BRIDGE = `
+  window.FrontierAndroid = {
+    info: () => JSON.stringify({ app: '0.0.0-shell', web: '0.0.0-shell', repo: 'doc9830/frontier', repoUrl: '' }),
+    check: () => {},
+    installWeb: () => {},
+    installApk: () => {},
+    openInstallSettings: () => {},
+    reload: () => {},
+    toast: () => {},
+  };
+`;
+
 /** Сборка обслуживается либо уже запущенным preview, либо поднимается здесь. */
 async function ensurePreview(base) {
   const origin = new URL(base).origin;
@@ -567,6 +584,64 @@ const afterEscape = await evaluate("document.querySelector('.panelcol .sheet-bac
 check('Escape pops the subscreen too', escapeBack === true && afterEscape === true);
 const bridge = await evaluate("typeof window.__frontierBack");
 check('browser build leaves the hardware back to the shell', bridge === 'undefined', bridge);
+
+// Оболочка Android: та же сборка, но с мостом window.FrontierAndroid. Аппаратная
+// «назад» обязана спрашивать игру (подэкран → лист), а не закрывать приложение.
+console.log('\n[9b] android shell back bridge');
+await send('Page.addScriptToEvaluateOnNewDocument', { source: SHELL_BRIDGE });
+await send('Page.navigate', { url });
+await sleep(2500);
+const shellBridge = await evaluate('typeof window.__frontierBack');
+check('shell build exposes the back bridge', shellBridge === 'function', shellBridge);
+const shellBoot = await evaluate(`
+  (() => {
+    const resume = [...document.querySelectorAll('button')].find((b) => b.textContent.includes('ПРОДОЛЖИТЬ'));
+    if (resume && !resume.disabled) {
+      resume.click();
+      return 'resumed';
+    }
+    const again = [...document.querySelectorAll('button')].find((b) => b.textContent.includes('НОВАЯ ГАЛАКТИКА'));
+    if (again) {
+      again.click();
+      return 'new';
+    }
+    return 'missing';
+  })()
+`);
+check('shell tab reaches the game', shellBoot !== 'missing', shellBoot);
+await sleep(1500);
+
+// Раздел СИСТЕМА: тап по активному разделу только закрывает лист, поэтому его
+// сначала закрываем (если он открыт), затем открываем заново.
+await clickDock('СИСТЕМА');
+await sleep(450);
+if ((await evaluate("document.querySelector('.panelcol')?.classList.contains('open')")) !== true) {
+  await clickDock('СИСТЕМА');
+  await sleep(450);
+}
+const openedStations = await clickButton('СТАНЦИИ');
+check('subscreen is open before the back press', openedStations === 'clicked', openedStations);
+await sleep(450);
+const subPress = await evaluate('window.__frontierBack()');
+await sleep(450);
+const subGone = await evaluate("document.querySelector('.panelcol .sheet-back') === null");
+check(
+  'the first hardware back press closes the subscreen inside the game',
+  subPress === true && subGone === true,
+  `consumed: ${subPress}`,
+);
+const sheetPress = await evaluate('window.__frontierBack()');
+await sleep(450);
+const sheetGone = await evaluate(
+  "document.querySelector('.panelcol')?.classList.contains('open') === false",
+);
+check('the next press closes the sheet', sheetPress === true && sheetGone === true, `consumed: ${sheetPress}`);
+let exitPress = await evaluate('window.__frontierBack()');
+for (let attempt = 0; attempt < 4 && exitPress !== false; attempt += 1) {
+  await sleep(350);
+  exitPress = await evaluate('window.__frontierBack()');
+}
+check('an empty screen leaves the exit press to the shell', exitPress === false, `consumed: ${exitPress}`);
 await send('Emulation.clearDeviceMetricsOverride');
 
 freshTab.close();

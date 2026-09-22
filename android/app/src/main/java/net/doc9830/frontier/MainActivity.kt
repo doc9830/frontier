@@ -24,6 +24,8 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
+import android.window.OnBackInvokedCallback
+import android.window.OnBackInvokedDispatcher
 import androidx.webkit.WebViewAssetLoader
 import org.json.JSONObject
 
@@ -54,6 +56,12 @@ class MainActivity : Activity() {
 
     private val consoleTail = ArrayDeque<String>()
     private var lastBackPress = 0L
+    /**
+     * Android 13 stopped asking the activity about back presses: the system consults
+     * the window's dispatcher instead, and without a registration there the player
+     * leaves the app from any screen. The callback lives here so it can be removed.
+     */
+    private var backCallback: OnBackInvokedCallback? = null
     private var lastRendererRestart = 0L
     private var lastNotice: String = ""
 
@@ -83,6 +91,7 @@ class MainActivity : Activity() {
             ),
         )
         setContentView(root)
+        registerBackHandler()
 
         webView.loadUrl("$ASSET_ORIGIN/index.html")
 
@@ -110,6 +119,7 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
+        unregisterBackHandler()
         UpdateEvents.register(null)
         webView.destroy()
         super.onDestroy()
@@ -357,8 +367,45 @@ class MainActivity : Activity() {
 
     // --- behaviour -----------------------------------------------------------
 
+    /**
+     * Back belongs to the game: the page closes its topmost screen and only a second
+     * press within two seconds leaves the app. On Android 12 and older this is the
+     * entry point the system uses; from Android 13 the dispatcher below calls the
+     * very same handler.
+     */
     @Deprecated("Back is offered to the game first, then handled here.")
     override fun onBackPressed() {
+        offerBackToGame()
+    }
+
+    /**
+     * Android 13+ (API 33) hands back presses to the window dispatcher and never calls
+     * onBackPressed() again, so the same handler has to be registered there. Below that
+     * release the manifest flag is ignored and onBackPressed() keeps working.
+     */
+    private fun registerBackHandler() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+        val callback = OnBackInvokedCallback { offerBackToGame() }
+        backCallback = callback
+        window.onBackInvokedDispatcher.registerOnBackInvokedCallback(
+            OnBackInvokedDispatcher.PRIORITY_DEFAULT,
+            callback,
+        )
+    }
+
+    private fun unregisterBackHandler() {
+        val callback = backCallback ?: return
+        backCallback = null
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            window.onBackInvokedDispatcher.unregisterOnBackInvokedCallback(callback)
+        }
+    }
+
+    /**
+     * The press goes to the page first: it answers `true` when it closed a screen of its
+     * own. Only an unanswered press counts towards leaving the app.
+     */
+    private fun offerBackToGame() {
         webView.evaluateJavascript(BACK_JS) { result ->
             if (result?.trim('"') == "true") return@evaluateJavascript
             val now = System.currentTimeMillis()

@@ -2,7 +2,7 @@ import type { GameState } from '../../game/types.ts';
 import { playerShip } from '../../game/state/create.ts';
 import { SERVICE_INFO, dockedStations, stationServiceList, stationTypeLabel } from '../../game/data/stations.ts';
 import type { StationService } from '../../game/data/stations.ts';
-import { stationPhaseLabel } from '../../game/site/site.ts';
+import { stationPhase, stationPhaseLabel } from '../../game/site/site.ts';
 import { refuelCost, refuelShip, repairCost, repairShip } from '../../game/actions/trade.ts';
 import { cr } from '../format.ts';
 import { Btn, Hint, Hub, Panel, Row, Tag, Tile } from '../kit.tsx';
@@ -86,7 +86,7 @@ export function StationServices({
             label="Репутация"
             value={station.factionId ? state.player.reputation[station.factionId] ?? 0 : 'не требуется'}
           />
-          {own ? <Row label="Стадия" value={stationPhaseLabel(state.station.phase)} /> : null}
+          {own ? <Row label="Стадия" value={stationPhaseLabel(stationPhase(state))} /> : null}
           {own ? <Row label="Командный центр" value={`Mk ${state.station.level}`} /> : null}
           <Row
             label="Услуги"

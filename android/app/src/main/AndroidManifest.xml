@@ -6,6 +6,9 @@
     <!-- Self-update of the APK itself, without ever leaving the app. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
+    <!-- enableOnBackInvokedCallback: Android 13+ asks the window dispatcher instead of
+         Activity.onBackPressed(), so the shell registers its own handler there and the
+         game closes its screens before any second press leaves the app. -->
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
@@ -13,7 +16,8 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="false"
         android:theme="@style/Theme.Frontier"
-        android:usesCleartextTraffic="false">
+        android:usesCleartextTraffic="false"
+        android:enableOnBackInvokedCallback="true">
 
         <activity
             android:name=".MainActivity"

@@ -1,6 +1,7 @@
 import type { GameState } from './types.ts';
 import { SAVE_VERSION, createGameState } from './state/create.ts';
 import { fallbackBeltReserve } from './data/belts.ts';
+import { stationPhaseOf } from './sim/station.ts';
 
 /**
  * Persistence. The whole world is intentionally plain serializable data, so the
@@ -31,6 +32,11 @@ function storage(): Storage | null {
  * В v3 появились контракты-курьеры и клейма верфей: старые записи доски
  * становятся контрактами-поставками, а модули — серийной сборкой.
  * В v4 появились арендуемые склады на станциях фракций (услуга «склад»).
+ *
+ * Стадия станции не восстанавливается из поля `phase`, а выводится из построек:
+ * у сейвов 0.1.x поля не было, но база со складом уже стояла — такая станция
+ * считалась «участком», из-за чего склад не принимал груз, а командный центр
+ * было не построить. Теперь сейв и площадка не могут разойтись.
  */
 function migrate(state: GameState, fromVersion: number): GameState {
   if (fromVersion < SAVE_VERSION) {
@@ -38,9 +44,7 @@ function migrate(state: GameState, fromVersion: number): GameState {
     station.sitePlanetId = station.sitePlanetId ?? null;
     station.production = Array.isArray(station.production) ? station.production : [];
     station.research = station.research ?? { mining: 0, trade: 0, logistics: 0 };
-    station.phase =
-      station.phase ??
-      ((station.buildings?.commandCenter ?? 0) > 0 ? 'operational' : 'planned');
+    station.phase = stationPhaseOf(station);
     if (station.phase !== 'planned' && !station.systemId) {
       station.systemId = state.player.homeSystemId;
     }

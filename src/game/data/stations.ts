@@ -1,5 +1,6 @@
 import type { GameState, SystemStation } from '../types.ts';
 import { LAWLESS_COLOR, LAWLESS_NAME, LAWLESS_SHORT } from './factions.ts';
+import { stationHasStorage, stationPhaseOf } from '../sim/station.ts';
 
 /**
  * Услуги станций. Набор услуг выводится из типа станции и флагов, которые
@@ -126,12 +127,12 @@ export function serviceAccess(
 
 /**
  * Своя станция как обычная станция системы: эти же флаги услуг читает UI, а
- * набор услуг выводится из построек базы. Пока идёт закладка (phase 'planned'),
- * станции ещё нет — вернётся null.
+ * набор услуг выводится из построек базы. Пока базы нет (стадия «участок»),
+ * вернётся null — иначе она попала бы в списки станций системы.
  */
 export function ownStationRecord(state: GameState): SystemStation | null {
   const station = state.station;
-  if (!station.systemId || (station.phase ?? 'operational') === 'planned') return null;
+  if (!station.systemId || stationPhaseOf(station) === 'planned') return null;
   const dock = (station.buildings.dock ?? 0) > 0;
   return {
     id: station.id,
@@ -143,7 +144,7 @@ export function ownStationRecord(state: GameState): SystemStation | null {
     hasContracts: false,
     hasRefuel: dock,
     hasRepair: dock,
-    hasStorage: (station.buildings.warehouse ?? 0) > 0,
+    hasStorage: stationHasStorage(station),
   };
 }
 

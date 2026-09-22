@@ -18,6 +18,7 @@ import { depotAmounts, depotHere, depotRefusal } from '../src/game/sim/depots.ts
 import { serviceAccess, stationServices } from '../src/game/data/stations.ts';
 
 import { startMining } from '../src/game/sim/mining.ts';
+import { stationPhaseOf } from '../src/game/sim/station.ts';
 import { startConstruction } from '../src/game/actions/build.ts';
 import { cancelSurvey, startSurvey } from '../src/game/exploration/scan.ts';
 import { FOUNDATION_MATERIALS, stationPhase } from '../src/game/site/site.ts';
@@ -356,7 +357,8 @@ if (claimSystem) {
     expect('construction progress bar renders', building.includes('progress-fill'));
     state.station.construction = null;
     state.station.buildings.commandCenter = 1;
-    state.station.phase = 'operational';
+    // Стадия выводится из построек: поле phase — только зеркало для сейва.
+    state.station.phase = stationPhaseOf(state.station);
     state.station.level = 1;
     const operational = render('StationPanel (operational)', <StationPanel state={state} run={run} />);
     expect('operational station shows the site row', operational.includes('Участок'));

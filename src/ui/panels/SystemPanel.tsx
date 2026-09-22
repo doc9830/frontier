@@ -8,7 +8,7 @@ import { resource } from '../../game/data/resources.ts';
 import { planetKindOf, PLANET_BONUS_LABEL } from '../../game/data/planets.ts';
 import { SERVICE_INFO, dockedStations, stationTypeLabel } from '../../game/data/stations.ts';
 import type { StationService } from '../../game/data/stations.ts';
-import { stationPhaseLabel, localSiteCandidate } from '../../game/site/site.ts';
+import { localSiteCandidate, stationPhase, stationPhaseLabel } from '../../game/site/site.ts';
 import { miningStatus } from '../../game/sim/mining.ts';
 import { duration, num, pct, riskText, threatColor } from '../format.ts';
 import { hops } from '../../game/plural.ts';
@@ -43,6 +43,8 @@ export function SystemPanel({
   const beltsKnown = system.belts.filter((belt) => belt.discovered).length;
   const stationsHere = dockedStations(state, ship.systemId);
   const ownRecord = stationsHere.find((entry) => entry.own) ?? null;
+  /** Стадия базы — производная от построек, не поле сейва. */
+  const baseStage = stationPhase(state);
   /** Участок ищут только в системе, где стоит корабль, — подсказка для воронки. */
   const local = localSiteCandidate(state);
 
@@ -134,7 +136,7 @@ export function SystemPanel({
             <div className="list-main">
               <b>
                 {ownRecord.station.name}{' '}
-                <span className="dim">· {stationPhaseLabel(state.station.phase)}</span>
+                <span className="dim">· {stationPhaseLabel(baseStage)}</span>
               </b>
               <span className="dim">
                 КЦ Mk {state.station.level} · услуги:{' '}
@@ -154,7 +156,7 @@ export function SystemPanel({
         ) : (
           <>
             <Hint>
-              {state.station.phase === 'planned'
+              {baseStage === 'planned'
                 ? local?.ok
                   ? `Система ${system.name} годится под закладку: выберите планету и заложите склад.`
                   : (local?.reasons[0] ??
@@ -165,9 +167,9 @@ export function SystemPanel({
             </Hint>
             <div className="row-actions">
               <Btn size="small" kind="primary" onClick={() => onOpen({ id: 'site' })}>
-                {state.station.phase === 'planned' ? 'СТРОИТЕЛЬСТВО СТАНЦИИ' : 'УЧАСТОК И ЗАКЛАДКА'}
+                {baseStage === 'planned' ? 'СТРОИТЕЛЬСТВО СТАНЦИИ' : 'УЧАСТОК И ЗАКЛАДКА'}
               </Btn>
-              {state.station.phase !== 'planned' ? (
+              {baseStage !== 'planned' ? (
                 <Btn size="small" onClick={() => onOpen({ id: 'base' })}>
                   УПРАВЛЕНИЕ БАЗОЙ
                 </Btn>

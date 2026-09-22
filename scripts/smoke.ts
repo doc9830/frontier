@@ -29,7 +29,7 @@ import {
   serviceHere,
   unloadToStation,
 } from '../src/game/actions/trade.ts';
-import { serviceAccess, stationServices } from '../src/game/data/stations.ts';
+import { ownStationRecord, serviceAccess, stationServices } from '../src/game/data/stations.ts';
 import { depotAmounts, depotHere } from '../src/game/sim/depots.ts';
 import {
   amountsSummary,
@@ -761,7 +761,10 @@ if (hostileSystemId) {
 }
 
 const ownSystemId = yardlessId ?? yardState.station.systemId;
-yardState.station.phase = 'operational';
+// База введена в строй: стадия выводится из построек, поле phase не пишем —
+// так проверка ловит код, который снова начнёт читать стадию из сейва.
+yardState.station.buildings.commandCenter = 1;
+yardState.station.level = 1;
 yardState.station.systemId = ownSystemId;
 yardState.station.buildings.shipyard = 1;
 yardShip.systemId = ownSystemId;
@@ -916,7 +919,7 @@ check('time multiplier scales the step', tickSeconds(2, { ...defaults, speed: 4 
 check('a negative frame never rewinds time', tickSeconds(-5, defaults, false) === 0);
 
 // --------------------------------------------------------------- миграция сейва
-console.log('\n[11] save migration (v3 → v4)');
+console.log('\n[11] save migration (v1/v3 → v4)');
 {
   // Сейв до арендуемых складов: у станций нет флага «склад», у мира нет depots.
   const legacy = JSON.parse(exportSave(state)) as { version: number; state: GameState };
@@ -933,6 +936,93 @@ console.log('\n[11] save migration (v3 → v4)');
     !!restored && restored.systemIds.every((id) => restored.systems[id].stations.every((st) => st.hasStorage !== false)),
   );
   check('save version is up to date', !!restored && restored.version === SAVE_VERSION);
+
+  /** Постройки старого сейва: в записи перечислено только то, что стояло. */
+  const legacyBuildings = (standing: Record<string, number>) =>
+    Object.fromEntries(Object.keys(state.station.buildings).map((key) => [key, standing[key] ?? 0]));
+  /** Сейв 0.1.x: ни поля phase, ни планеты площадки, ни таблицы складов. */
+  const asLegacySave = (buildings: Record<string, number>, storage: Record<string, number>) => {
+    const save = JSON.parse(exportSave(state)) as { version: number; state: GameState };
+    save.version = 1;
+    delete (save.state as Partial<GameState>).depots;
+    for (const id of save.state.systemIds) {
+      for (const station of save.state.systems[id]?.stations ?? []) delete station.hasStorage;
+    }
+    const own = save.state.station as unknown as Record<string, unknown>;
+    delete own.phase;
+    delete own.sitePlanetId;
+    own.buildings = legacyBuildings(buildings);
+    own.construction = null;
+    own.storage = storage;
+    // В 0.1.x КЦ стоил 6000 кр, и на него всегда хватало: кредиты не предмет теста.
+    const imported = importSave(JSON.stringify(save));
+    if (imported) {
+      imported.player.credits = Math.max(imported.player.credits, 50000);
+      // Корабль ставим к базе: склады работают только в одной системе с ней.
+      const ship = playerShip(imported);
+      if (ship) {
+        ship.systemId = imported.station.systemId;
+        ship.status = 'docked';
+        ship.travel = null;
+        ship.cargo = {};
+      }
+    }
+    return imported;
+  };
+
+  // Склад на базе уже стоял, а поля phase в сейве не было — станция числилась
+  // «участком» с нулевой ёмкостью: груз не выгружался, КЦ не предлагался.
+  const stalePhase = asLegacySave({ warehouse: 1 }, { metal: 60 });
+  check('0.1.x base with a standing warehouse loads', !!stalePhase);
+  check(
+    'stage comes from the buildings, not from the missing save field',
+    !!stalePhase && stationPhase(stalePhase) === 'foundation',
+    stalePhase ? stationPhase(stalePhase) : 'no state',
+  );
+  check(
+    'its warehouse counts as storage again',
+    !!stalePhase && ownStationRecord(stalePhase)?.hasStorage === true,
+  );
+  check(
+    'its cargo stays visible and unloadable',
+    !!stalePhase &&
+      storageCapacity(stalePhase.station) > 0 &&
+      storageUsed(stalePhase.station) === 60 &&
+      depotHere(stalePhase)?.own === true,
+    stalePhase ? `${storageCapacity(stalePhase.station)} / ${storageUsed(stalePhase.station)}` : 'no state',
+  );
+  check(
+    'command centre is offered on it',
+    !!stalePhase &&
+      buildingOffers(stalePhase).some((offer) => offer.type === 'commandCenter' && offer.phaseOk),
+  );
+
+  // Сейв 0.1.4: КЦ Mk1 стоял с самого старта, склада игрок не строил — в 0.1.x
+  // он был не нужен, а сейчас без него груз некуда выгрузить и КЦ не построить.
+  const preWarehouse = asLegacySave({ commandCenter: 1 }, { metal: 80, electronics: 8 });
+  check(
+    'a working 0.1.4 base loads as operational',
+    !!preWarehouse && stationPhase(preWarehouse) === 'operational',
+    preWarehouse ? stationPhase(preWarehouse) : 'no state',
+  );
+  check(
+    'its pre-warehouse storage is restored',
+    !!preWarehouse &&
+      depotHere(preWarehouse)?.own === true &&
+      storageUsed(preWarehouse.station) === 88,
+    preWarehouse ? `${depotHere(preWarehouse)?.capacity ?? 0} / ${storageUsed(preWarehouse.station)}` : 'no state',
+  );
+  check(
+    'a warehouse can be built with what is on hand',
+    !!preWarehouse && startConstruction(preWarehouse, 'warehouse'),
+  );
+  check(
+    'command centre Mk2 opens right after loading',
+    !!preWarehouse &&
+      buildingOffers(preWarehouse).some(
+        (offer) => offer.type === 'commandCenter' && offer.level === 1 && offer.phaseOk,
+      ),
+  );
 }
 
 console.log(`\n${checks - failures}/${checks} checks passed, ${failures} failed.`);

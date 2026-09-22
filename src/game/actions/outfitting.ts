@@ -20,6 +20,7 @@ import { addNews } from '../news/news.ts';
 import { fleetCap, fleetShips } from '../sim/fleet.ts';
 import { depotHere, depotRecord, takeFromDepot } from '../sim/depots.ts';
 import { serviceAccess } from '../data/stations.ts';
+import { stationPhase } from '../site/site.ts';
 
 /**
  * Outfitting and hull trading. Верфь — это объект: у фракционных станций она
@@ -75,7 +76,7 @@ export function shipyardHere(state: GameState, ship: Ship): ShipyardHere {
   }
 
   const ownLevel =
-    ship.systemId === state.station.systemId && state.station.phase === 'operational'
+    ship.systemId === state.station.systemId && stationPhase(state) === 'operational'
       ? state.station.buildings.shipyard ?? 0
       : 0;
 

@@ -96,11 +96,15 @@ export function App() {
   };
 
   /**
-   * Один шаг назад. Порядок: подэкран → лист → выделение на карте. Если ничего
-   * не открыто, возвращаем false — тогда Android-оболочка закроет приложение
-   * (она ждёт второго нажатия за две секунды).
+   * Один шаг назад. Порядок: подтверждение прыжка → подэкран → лист → выделение на
+   * карте. Если ничего не открыто, возвращаем false — тогда Android-оболочка
+   * закроет приложение (она ждёт второго нажатия за две секунды).
    */
   const goBack = (): boolean => {
+    if (jumpTarget) {
+      setJumpTarget(null);
+      return true;
+    }
     if (screens.length > 0) {
       setScreens((prev) => prev.slice(0, -1));
       return true;
@@ -207,7 +211,7 @@ export function App() {
   useEffect(() => {
     if (!isAndroidShell()) return;
     return onShellBack(() => goBack());
-  }, [screens, sheetOpen, selectedId]);
+  }, [screens, sheetOpen, selectedId, jumpTarget]);
 
   if (!state) {
     return (

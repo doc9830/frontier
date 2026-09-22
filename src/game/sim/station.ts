@@ -1,4 +1,4 @@
-import type { GameState, PlayerStation, ResourceId } from '../types.ts';
+import type { GameState, PlayerStation, ResourceId, StationPhase } from '../types.ts';
 import { warehouseCapacity, buildingDef } from '../data/buildings.ts';
 import { recipe } from '../data/recipes.ts';
 import { addToast } from './toast.ts';
@@ -12,10 +12,45 @@ import { MINEABLE, resourceSymbol } from '../data/resources.ts';
 
 const BASE_STORAGE = 120;
 
+/**
+ * Стадия станции выводится из построек, а не читается из поля `phase`.
+ *
+ * В сохранениях 0.1.x этого поля не было вовсе, а база со складом уже стояла: при
+ * загрузке такая станция считалась «участком» — склад не принимал груз, и
+ * командный центр было не построить даже с материалами на руках. Постройки
+ * описывают ту же стадию, но никогда не расходятся с тем, что реально стоит на
+ * площадке, поэтому источник правды — они.
+ */
+export function stationPhaseOf(station: PlayerStation): StationPhase {
+  const buildings = station.buildings ?? {};
+  if ((buildings.commandCenter ?? 0) > 0) return 'operational';
+  // Склад — первый шаг воронки: он же превращает голый участок в стройплощадку.
+  if ((buildings.warehouse ?? 0) > 0 || station.construction?.building === 'warehouse') {
+    return 'foundation';
+  }
+  // Другие постройки без склада бывают только в старых сейвах: база уже стоит.
+  if (Object.values(buildings).some((level) => (level ?? 0) > 0)) return 'foundation';
+  return 'planned';
+}
+
 /** Склад появляется только вместе с закладкой: до неё хранить нечего и негде. */
 export function storageCapacity(station: PlayerStation): number {
-  if ((station.phase ?? 'operational') === 'planned') return 0;
+  if (stationPhaseOf(station) === 'planned') return 0;
   return BASE_STORAGE + warehouseCapacity(station.buildings.warehouse ?? 0);
+}
+
+/**
+ * Работает ли склад базы как услуга станции.
+ *
+ * Новым базам склад открывает постройка Склада. У станции старого образца
+ * (`sitePlanetId` пуст — она досталась от 0.1.x) склад был изначально: там
+ * считались только базовые 120 единиц, и постройки Склада никто не требовал.
+ * Если спрятать такой склад, груз на базе становится недоступен через интерфейс,
+ * а КЦ не построить: материалы некуда выгрузить.
+ */
+export function stationHasStorage(station: PlayerStation): boolean {
+  if (stationPhaseOf(station) === 'planned') return false;
+  return (station.buildings.warehouse ?? 0) > 0 || !station.sitePlanetId;
 }
 
 export function storageUsed(station: PlayerStation): number {
@@ -82,6 +117,8 @@ export function processStation(state: GameState): void {
 
   if (station.construction && now >= station.construction.finishAt) {
     const job = station.construction;
+    // Стадия до стройки: КЦ Mk1 вводит базу в строй именно из «стройплощадки».
+    const wasFoundation = stationPhaseOf(station) === 'foundation';
     station.buildings[job.building] = job.targetLevel;
     if (job.building === 'commandCenter') station.level = job.targetLevel;
     station.construction = null;
@@ -97,8 +134,7 @@ export function processStation(state: GameState): void {
     );
     // Базовая станция: закладка превращается в действующий узел, включая бонус
     // площадки. До этого уровня станция считается стройплощадкой.
-    if (job.building === 'commandCenter' && station.phase === 'foundation') {
-      station.phase = 'operational';
+    if (job.building === 'commandCenter' && wasFoundation) {
       const site = station.sitePlanetId
         ? state.systems[station.systemId]?.planets.find((p) => p.id === station.sitePlanetId)
         : null;
@@ -110,6 +146,9 @@ export function processStation(state: GameState): void {
         station.systemId,
       );
     }
+    // Поле стадии следует за постройками: сейв никогда не расходится с площадкой,
+    // и КЦ Mk2 открывается сразу после ввода базы в строй.
+    station.phase = stationPhaseOf(station);
   }
 
   for (let i = station.production.length - 1; i >= 0; i -= 1) {

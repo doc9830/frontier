@@ -6,7 +6,7 @@ import {
 } from '../data/buildings.ts';
 import { phaseAllows, buildingSeconds } from '../site/site.ts';
 import { recipe, recipesForLevel } from '../data/recipes.ts';
-import { removeStorage, slotsUsed } from '../sim/station.ts';
+import { removeStorage, slotsUsed, stationPhaseOf } from '../sim/station.ts';
 import { addToast } from '../sim/toast.ts';
 import { addNews } from '../news/news.ts';
 
@@ -163,9 +163,9 @@ export function cancelConstruction(state: GameState): void {
     state.station.storage[id] = (state.station.storage[id] ?? 0) + Math.round(qty * 0.6);
   }
   state.station.construction = null;
-  // Отмена самой закладки возвращает станцию в состояние «участок выбран».
-  if (state.station.phase === 'foundation' && (state.station.buildings.warehouse ?? 0) === 0) {
-    state.station.phase = 'planned';
+  // Стадия — производная от построек: склад не заложен и стройки нет — снова участок.
+  state.station.phase = stationPhaseOf(state.station);
+  if (state.station.phase === 'planned') {
     addToast(state, 'Закладка отменена: станция снова на стадии выбора участка.', 'info');
     return;
   }
