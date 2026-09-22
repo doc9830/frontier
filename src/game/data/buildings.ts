@@ -16,11 +16,6 @@ export function fleetLimit(level: number, fleetOfficeLevel: number): number {
   return 3 + fleetOfficeLevel + (level >= 3 ? 1 : 0) + (level >= 6 ? 1 : 0);
 }
 
-/** How many refinery batches can run at the same time. */
-export function refinerySlots(level: number): number {
-  return Math.max(0, level);
-}
-
 export const BUILDINGS: BuildingDef[] = [
   {
     type: 'commandCenter',

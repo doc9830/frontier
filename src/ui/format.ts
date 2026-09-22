@@ -1,6 +1,5 @@
 import type { Amounts, ResourceId, RiskLevel, ShipStatus } from '../game/types.ts';
 import { resource } from '../game/data/resources.ts';
-import { plural } from '../game/plural.ts';
 
 /** Small presentation helpers shared by every panel. */
 
@@ -20,10 +19,6 @@ export function amountsText(amounts: Amounts | undefined | null): string {
     .filter(([, qty]) => (qty ?? 0) > 0)
     .map(([id, qty]) => `${num(qty ?? 0)} ${resource(id as ResourceId).symbol}`);
   return parts.length > 0 ? parts.join(' · ') : '—';
-}
-
-export function unitsText(count: number): string {
-  return `${num(count)} ${plural(count, 'единица', 'единицы', 'единиц')}`;
 }
 
 export function duration(seconds: number): string {

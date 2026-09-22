@@ -6,6 +6,18 @@
  * Run with: npm run smoke
  */
 import type { GameState, ResourceId } from '../src/game/types.ts';
+import { createEncounter } from '../src/game/combat/combat.ts';
+import {
+  BATTLE_SECONDS,
+  autoBattle,
+  battleForecast,
+  battleResult,
+  combatBalance,
+  createBattle,
+  fireAt,
+  radarPoint,
+  tickBattle,
+} from '../src/game/combat/minigame.ts';
 import { createGameState, playerShip, SAVE_VERSION } from '../src/game/state/create.ts';
 import { SYSTEM_COUNT } from '../src/game/universe/generate.ts';
 import { exportSave, importSave } from '../src/game/save.ts';
@@ -104,6 +116,11 @@ function check(label: string, condition: boolean, detail = ''): void {
   }
   failures += 1;
   console.log(`  FAIL ${label}${detail ? ` — ${detail}` : ''}`);
+}
+
+/** Точка канваса (0..1) → полярные координаты радара: обратное к radarPoint. */
+function targetRadius(point: { x: number; y: number }): number {
+  return Math.min(1, Math.hypot(point.x - 0.5, point.y - 0.5) * 2);
 }
 
 function finite(label: string, value: number): void {
@@ -901,6 +918,147 @@ check('event left the ship in a known state', ['docked', 'transit', 'mining'].in
 check('combat resolved without NaN', Number.isFinite(raidShip.hull) && Number.isFinite(raidShip.shield));
 check('event produced feedback for the player', !!raid.news[0], raid.news[0]?.text.slice(0, 60));
 console.log(`  info hull ${hullBefore} → ${Math.round(raidShip.hull)}, news ${raid.news.length} items, toasts ${raid.toast ? 'yes' : 'no'}`);
+
+// --------------------------------------------------------- боевая мини-игра
+console.log('\n[9b] боевая мини-игра: радар, тапы, автобой');
+const gunner = createGameState('SMOKE-GUNNER', 'GUNNER');
+const gunnerShip = playerShip(gunner);
+const foe = createEncounter(gunner, gunnerShip.systemId, 1);
+const balance = combatBalance(gunnerShip, foe);
+check(
+  'balance asks for hits but leaves room to miss',
+  balance.hitsToWin > 0 && balance.hitsToWin < balance.shots,
+  `${balance.hitsToWin} of ${balance.shots} shots`,
+);
+check(
+  'the hull survives at least one volley',
+  balance.lossesAllowed >= 1 && balance.lossesAllowed <= balance.volleys,
+  `${balance.lossesAllowed} of ${balance.volleys} volleys`,
+);
+check(
+  'damage numbers are positive',
+  balance.shotDamage > 0 && balance.volleyDamage > 0 && balance.volleyPeriod > 0,
+);
+
+const battle = createBattle(gunnerShip, foe);
+check(
+  'battle starts loaded, on time and with targets',
+  battle.charge >= 1 && battle.timeLeft === BATTLE_SECONDS && battle.raiders.length >= 1,
+  `${battle.raiders.length} blip(s), ${battle.timeLeft} s`,
+);
+check('sweep stays inside one turn', battle.sweep >= 0 && battle.sweep < Math.PI * 2);
+check(
+  'radar geometry maps the screen centre to the hull',
+  Math.abs(radarPoint(0, 0).x - 0.5) < 1e-9 && Math.abs(radarPoint(0, 1).y - 0.5) < 1e-9,
+);
+
+// Вьюнок без выстрелов: залпы противника обязаны добить корабль до конца боя.
+const idle = createBattle(gunnerShip, foe);
+let idleSeconds = 0;
+while (!idle.over && idleSeconds < BATTLE_SECONDS * 2) {
+  tickBattle(idle, 1 / 60);
+  idleSeconds += 1 / 60;
+}
+check('volleys alone end the fight', idle.over && idle.outcome === 'defeat', `${idleSeconds.toFixed(1)} s`);
+check('breaches match the balance rule', idle.breached >= idle.balance.lossesAllowed);
+check('log tells the story', idle.log.length > 0, `${idle.log.length} line(s)`);
+
+// Тап по подсвеченной метке — попадание, тап в пустой сектор — промах.
+const shots = createBattle(gunnerShip, foe);
+for (let step = 0; step < 60; step += 1) tickBattle(shots, 1 / 60);
+const lit = shots.raiders.find((blip) => blip.glow > 0) ?? shots.raiders[0];
+shots.volleys = [];
+const point = radarPoint(lit.angle, lit.radius);
+const hit = fireAt(shots, Math.atan2(point.y - 0.5, point.x - 0.5), targetRadius(point));
+check('a tap on a lit blip is a hit', hit.kind === 'hit', hit.text);
+check('the hit is counted', shots.enemyHits === 1 && shots.shots === 1);
+check('the gun needs reloading after a shot', shots.charge < 1 && fireAt(shots, 0, 1).kind === 'reload');
+shots.charge = 1;
+const miss = fireAt(shots, (lit.angle + Math.PI) % (Math.PI * 2), 0.5);
+check('a tap into empty space is a miss', miss.kind === 'miss', miss.text);
+check('misses are counted', shots.misses === 1 && shots.enemyHits === 1);
+
+// Залп перехватывается тем же тапом: приоритет у залпа, а не у метки.
+shots.charge = 1;
+shots.volleys = [{ id: 99, angle: 1.2, radius: 0.55, fuse: 1.2, glow: 0 }];
+const volleyPoint = radarPoint(1.2, 0.55);
+const intercept = fireAt(
+  shots,
+  Math.atan2(volleyPoint.y - 0.5, volleyPoint.x - 0.5),
+  targetRadius(volleyPoint),
+);
+check('a tap on a volley intercepts it', intercept.kind === 'intercept', intercept.text);
+check('the intercepted volley leaves the radar', shots.volleys.length === 0 && shots.intercepted === 1);
+
+// Автобой и прогноз — одна модель: сеяный прогноз стабилен и не врёт про исход.
+const forecast = battleForecast(gunnerShip, foe);
+const again = battleForecast(gunnerShip, foe);
+check('forecast probabilities add up', Math.abs(forecast.win + forecast.draw + forecast.loss - 1) < 1e-9);
+check('forecast is seeded and stable', forecast.win === again.win && forecast.verdict === again.verdict);
+check('forecast speaks plainly', forecast.verdict.length > 0, forecast.verdict);
+
+const auto = autoBattle(gunnerShip, foe);
+check(
+  'auto battle returns a real outcome',
+  ['victory', 'defeat', 'stalemate'].includes(auto.outcome),
+  `${auto.outcome}: hull ${auto.playerHull}, shield ${auto.playerShield}`,
+);
+check('auto battle keeps numbers finite', Number.isFinite(auto.playerHull) && Number.isFinite(auto.playerShield));
+check(
+  'auto battle pays the bounty only for a kill',
+  auto.outcome === 'victory' ? auto.bounty === foe.bounty : auto.bounty === 0,
+);
+check('auto battle kills the pilot after a defeat', auto.outcome !== 'defeat' || auto.playerHull === 0);
+check('battle result follows the battle state', battleResult(idle).outcome === 'defeat');
+
+// Проброс готового результата: окно события закрывается тем, что отыграл радар.
+const rigged = createGameState('SMOKE-GUNNER-2', 'GUNNER');
+const riggedShip = playerShip(rigged);
+rigged.pendingEvent = {
+  id: 'smoke:fight',
+  eventId: 'pirate_encounter',
+  shipId: riggedShip.id,
+  firedAt: rigged.gameTime,
+  payload: buildPayload(rigged, riggedShip, 'pirate_encounter'),
+};
+const radarCreditsBefore = rigged.player.credits;
+const killsBefore = riggedShip.kills;
+resolvePendingEvent(rigged, 'fight', {
+  log: ['радар отыграл бой'],
+  outcome: 'victory',
+  playerHull: 321,
+  playerShield: 7,
+  bounty: 4321,
+  repChange: 4,
+  repFactionId: null,
+});
+check('a prefilled fight closes the event', rigged.pendingEvent === null);
+check('radar hull and shield reach the ship', riggedShip.hull === 321 && riggedShip.shield === 7);
+check('radar bounty is paid out', rigged.player.credits === radarCreditsBefore + 4321, `${rigged.player.credits} кр`);
+check('the kill is counted', riggedShip.kills === killsBefore + 1);
+check('the win makes the news feed', rigged.news.length > 0, rigged.news[0]?.text.slice(0, 60));
+
+const lost = createGameState('SMOKE-GUNNER-3', 'GUNNER');
+const lostShip = playerShip(lost);
+lost.pendingEvent = {
+  id: 'smoke:fight-lost',
+  eventId: 'pirate_encounter',
+  shipId: lostShip.id,
+  firedAt: lost.gameTime,
+  payload: buildPayload(lost, lostShip, 'pirate_encounter'),
+};
+resolvePendingEvent(lost, 'fight', {
+  log: ['радар отыграл бой'],
+  outcome: 'defeat',
+  playerHull: 0,
+  playerShield: 0,
+  bounty: 0,
+  repChange: 0,
+  repFactionId: null,
+});
+check('a lost fight closes the event', lost.pendingEvent === null);
+check('a lost fight leaves a playable ship', lost.ships.length >= 1 && playerShip(lost).hull > 0);
+
 
 // --------------------------------------------------------------- app settings
 console.log('\n[10] app settings and pause');

@@ -197,14 +197,6 @@ export function planetKindOf(planet: Planet): PlanetKindDef {
   return pickPlanetKind(rng);
 }
 
-export function isBuildablePlanet(planet: Planet): boolean {
-  return planetKindOf(planet).buildable;
-}
-
-export function buildablePlanets(planets: readonly Planet[]): Planet[] {
-  return planets.filter(isBuildablePlanet);
-}
-
 /** Пригодность системы под станцию: свободна и есть хоть одна годная планета. */
 export function sitePlanetScore(planet: Planet): number {
   const kind = planetKindOf(planet);

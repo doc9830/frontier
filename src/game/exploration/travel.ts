@@ -90,14 +90,6 @@ export function planTravel(
   };
 }
 
-export function fuelAvailable(ship: Ship): number {
-  return Math.floor(ship.fuel);
-}
-
-export function canAffordJump(ship: Ship, plan: TravelPlan): boolean {
-  return fuelAvailable(ship) >= plan.fuel;
-}
-
 /** Travel time between two systems for an AI ship of the given speed. */
 export function missionTravelSeconds(from: StarSystem, to: StarSystem, speed: number): number {
   const lanes = Math.max(1, Math.round(distance(from.position, to.position) / 190));

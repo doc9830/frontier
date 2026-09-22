@@ -12,7 +12,6 @@ import {
 import {
   addCargo,
   cargoFree,
-  cargoUsed,
   removeCargo,
   sealedTotal,
   sealedUnits,
@@ -21,7 +20,6 @@ import {
 } from '../ships/ship.ts';
 import { addToDepot, depotHere, depotRecord, depotRefusal, takeFromDepot } from '../sim/depots.ts';
 import { addToast } from '../sim/toast.ts';
-import { addNews } from '../news/news.ts';
 import {
   changeReputation,
   reputationOf,
@@ -397,19 +395,5 @@ export function repairShip(state: GameState, ship: Ship): number {
   ship.shield = stats.shieldMax;
   addToast(state, `${ship.name} полностью отремонтирован за ${cost} кр.`, 'good');
   return cost;
-}
-
-/** Summary line used by the dock panel. */
-export function shipLoadSummary(ship: Ship): string {
-  const stats = shipStats(ship);
-  return `трюм ${cargoUsed(ship)}/${stats.cargo} · топливо ${Math.floor(ship.fuel)}/${stats.fuelMax} · корпус ${Math.round(ship.hull)}/${stats.hullMax}`;
-}
-
-export function stationStorageFree(state: GameState): number {
-  return depotHere(state)?.free ?? 0;
-}
-
-export function logTradeNews(state: GameState, text: string, systemId: string | null): void {
-  addNews(state, text, 'trade', systemId);
 }
 

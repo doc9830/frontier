@@ -187,7 +187,3 @@ export function playerShip(state: GameState): Ship {
   return ship ?? state.ships[0];
 }
 
-export function currentSystem(state: GameState) {
-  const ship = playerShip(state);
-  return state.systems[ship.systemId];
-}

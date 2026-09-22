@@ -28,10 +28,6 @@ export function beltReserve(belt: AsteroidBelt): number {
   return fallbackBeltReserve(belt);
 }
 
-export function beltExhausted(belt: AsteroidBelt): boolean {
-  return beltReserve(belt) <= MIN_BELT_RESERVE;
-}
-
 /**
  * Насколько пояс выработан, 0..1. Оценка приблизительная: исходный запас
  * восстанавливается детерминированно по id, поэтому полоска не «дрожит».

@@ -3,7 +3,7 @@ import { warehouseCapacity, buildingDef } from '../data/buildings.ts';
 import { recipe } from '../data/recipes.ts';
 import { addToast } from './toast.ts';
 import { addNews } from '../news/news.ts';
-import { MINEABLE, resourceSymbol } from '../data/resources.ts';
+import { resourceSymbol } from '../data/resources.ts';
 
 /**
  * Station simulation: construction, storage, refinery production and research.
@@ -104,13 +104,6 @@ export function slotsUsed(station: PlayerStation): number {
   return used;
 }
 
-export function trainableResearch(station: PlayerStation): { level: number; cost: number }[] {
-  return [1, 2, 3].map((level) => ({
-    level,
-    cost: level === 1 ? 2400 : level === 2 ? 6800 : 16000,
-  })).filter(() => station.buildings.researchLab > 0);
-}
-
 export function processStation(state: GameState): void {
   const station = state.station;
   const now = state.gameTime;
@@ -179,7 +172,3 @@ export function processStation(state: GameState): void {
   }
 }
 
-/** Mineable resources the station can process, used by the UI hints. */
-export function stationProcesses(): ResourceId[] {
-  return MINEABLE.slice();
-}

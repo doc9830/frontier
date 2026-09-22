@@ -597,5 +597,4 @@ export function generateUniverse(seed: string): Universe {
   };
 }
 
-export const UNIVERSE_START_DAY = START_DAY;
 

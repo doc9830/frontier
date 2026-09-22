@@ -1,5 +1,5 @@
 import type { GameState, SystemStation } from '../types.ts';
-import { LAWLESS_COLOR, LAWLESS_NAME, LAWLESS_SHORT } from './factions.ts';
+import { LAWLESS_NAME } from './factions.ts';
 import { stationHasStorage, stationPhaseOf } from '../sim/station.ts';
 
 /**
@@ -82,16 +82,6 @@ export function stationTypeLabel(type: SystemStation['type']): string {
 export function stationOwnerName(state: GameState, station: SystemStation): string {
   if (!station.factionId) return LAWLESS_NAME;
   return state.factions[station.factionId]?.name ?? station.factionId;
-}
-
-export function stationOwnerShort(state: GameState, station: SystemStation): string {
-  if (!station.factionId) return LAWLESS_SHORT;
-  return state.factions[station.factionId]?.short ?? station.factionId;
-}
-
-export function stationOwnerColor(state: GameState, station: SystemStation): string {
-  if (!station.factionId) return LAWLESS_COLOR;
-  return state.factions[station.factionId]?.color ?? LAWLESS_COLOR;
 }
 
 export interface ServiceAccess {

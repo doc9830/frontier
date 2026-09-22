@@ -1,15 +1,13 @@
-import type { Amounts, GameState, Planet, ResourceId } from '../types.ts';
+import type { Amounts, GameState, ResourceId } from '../types.ts';
 import { playerShip } from '../state/create.ts';
 import { addToast } from '../sim/toast.ts';
 import { addNews } from '../news/news.ts';
 import { cargoFree, removeCargo } from '../ships/ship.ts';
 import { resourceName } from '../data/resources.ts';
 import { buildingDef } from '../data/buildings.ts';
-import type { PlanetKindDef } from '../data/planets.ts';
 import { planetKindOf } from '../data/planets.ts';
 import {
   BASE_STATION_BUILDING,
-  BASE_STATION_LEVEL,
   FOUNDATION_BUILDING,
   FOUNDATION_CREDITS,
   FOUNDATION_MATERIALS,
@@ -32,19 +30,6 @@ export function materialsText(amounts: Amounts): string {
     .filter(([, qty]) => qty > 0)
     .map(([id, qty]) => `${qty} × ${resourceName(id)}`);
   return parts.length > 0 ? parts.join(', ') : 'ничего';
-}
-
-/** Планеты системы: годится ли каждая под закладку станции. */
-export function systemPlanets(
-  state: GameState,
-  systemId: string,
-): { planet: Planet; kind: PlanetKindDef; buildable: boolean }[] {
-  const system = state.systems[systemId];
-  if (!system) return [];
-  return system.planets.map((planet) => {
-    const kind = planetKindOf(planet);
-    return { planet, kind, buildable: kind.buildable };
-  });
 }
 
 export interface FoundationState {
@@ -229,9 +214,6 @@ export function haulFreeCargo(state: GameState): number {
   const ship = playerShip(state);
   return ship ? cargoFree(ship) : 0;
 }
-
-/** Сколько уровней КЦ считается базовой станцией (маркер воронки). */
-export const BASE_STATION_MARK = BASE_STATION_LEVEL;
 
 /** Подсказка «что делать дальше» на стадии закладки — для панели «Станция». */
 export function foundationHint(state: GameState): string {

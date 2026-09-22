@@ -12,7 +12,6 @@ import { createEncounter } from '../combat/combat.ts';
 import { addCargo } from '../ships/ship.ts';
 import { changeReputation, factionView } from '../factions/reputation.ts';
 import { addNews } from '../news/news.ts';
-import { resourceSymbol } from '../data/resources.ts';
 
 /**
  * Travel events. They are rare on purpose: most jumps complete quietly, and the
@@ -109,7 +108,7 @@ export const EVENT_DEFS: TravelEventDef[] = [
     weight: 22,
     interactive: true,
     choices: [
-      { id: 'fight', label: 'В БОЙ', hint: 'решает боевой рейтинг' },
+      { id: 'fight', label: 'В БОЙ', hint: 'бой на радаре: попадания решают исход' },
       { id: 'escape', label: 'УХОДИТЬ', hint: 'решает скорость' },
       { id: 'cargo', label: 'ОТДАТЬ ГРУЗ', hint: 'потеряете половину трюма' },
       { id: 'emergency', label: 'ЭКСТРЕННЫЙ ПРЫЖОК', hint: 'почти всегда работает, но бьёт по корпусу' },
@@ -225,13 +224,6 @@ export function grantCargo(ship: Ship, cargo: Amounts): { added: number; lost: n
     lost += qty - fit;
   }
   return { added, lost };
-}
-
-export function describeCargo(cargo: Amounts): string {
-  return Object.entries(cargo)
-    .filter(([, qty]) => (qty ?? 0) > 0)
-    .map(([id, qty]) => `${qty} ${resourceSymbol(id as ResourceId)}`)
-    .join(', ');
 }
 
 /** Reputation gain helper shared by several event outcomes. */

@@ -1,12 +1,36 @@
-import type { GameState } from '../game/types.ts';
+import type { Encounter, GameState, Ship } from '../game/types.ts';
 import { eventDef } from '../game/events/events.ts';
-import { RISK_SHORT, amountsText, threatColor } from './format.ts';
+import { battleForecast } from '../game/combat/minigame.ts';
+import { RISK_SHORT, amountsText, pct, threatColor } from './format.ts';
 import { Tag } from './kit.tsx';
 
 /**
  * Travel event modal. The simulation pauses on a pending event, so this is the
  * only way the trip can continue — every choice goes through the store.
  */
+
+/**
+ * Честный прогноз боя из мини-игры: сколько раз бой заканчивался победой при
+ * базовой меткости. Генератор сеяный, поэтому цифры не дрожат при перерисовке.
+ */
+function ForecastRow({ ship, enemy }: { ship: Ship; enemy: Encounter }) {
+  const forecast = battleForecast(ship, enemy);
+  const color = forecast.win >= 0.66 ? '#7ef7b0' : forecast.win >= 0.4 ? '#ffd166' : '#ff6b6b';
+  return (
+    <div className="list-row">
+      <div className="list-main">
+        <b>Прогноз боя</b>
+        <span className="dim">
+          победа {pct(forecast.win)} · ничья {pct(forecast.draw)} · гибель {pct(forecast.loss)} · нужно попаданий{' '}
+          {forecast.balance.hitsToWin} · корпус терпит {forecast.balance.lossesAllowed}
+        </span>
+      </div>
+      <div style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
+        <Tag color={color}>{forecast.verdict}</Tag>
+      </div>
+    </div>
+  );
+}
 
 export function EventModal({
   state,
@@ -52,6 +76,8 @@ export function EventModal({
               </div>
             </div>
           ) : null}
+
+          {enemy && ship ? <ForecastRow ship={ship} enemy={enemy} /> : null}
 
           {payload.cargo && Object.keys(payload.cargo).length > 0 ? (
             <div className="dim">на кону груз: {amountsText(payload.cargo)}</div>

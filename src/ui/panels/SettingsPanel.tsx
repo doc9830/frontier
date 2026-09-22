@@ -21,6 +21,7 @@ export function SettingsPanel({
   onChange,
   onReset,
   onSave,
+  onMenu,
 }: {
   state: GameState;
   settings: AppSettings;
@@ -29,6 +30,8 @@ export function SettingsPanel({
   onChange: (patch: Partial<AppSettings>) => void;
   onReset: () => void;
   onSave: () => void;
+  /** Сохраняет мир и возвращает в главное меню со слотами. */
+  onMenu: () => void;
 }) {
   const ship = playerShip(state);
   const discovered = state.systemIds.filter((id) => state.systems[id]?.discovered).length;
@@ -68,6 +71,15 @@ export function SettingsPanel({
           </div>
           <Btn size="small" onClick={onSave}>
             СОХРАНИТЬ
+          </Btn>
+        </div>
+        <div className="list-row">
+          <div className="list-main">
+            <span>Главное меню</span>
+            <span className="dim">мир запишется в свой слот, игра выгрузится из памяти</span>
+          </div>
+          <Btn size="small" onClick={onMenu}>
+            ГЛАВНОЕ МЕНЮ
           </Btn>
         </div>
       </Panel>

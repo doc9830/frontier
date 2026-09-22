@@ -1,5 +1,5 @@
-import type { Faction, GameState, ResourceId } from '../types.ts';
-import { FACTIONS, LAWLESS_COLOR, LAWLESS_NAME, LAWLESS_SHORT } from '../data/factions.ts';
+import type { Faction, GameState } from '../types.ts';
+import { LAWLESS_COLOR, LAWLESS_NAME, LAWLESS_SHORT } from '../data/factions.ts';
 import { clamp } from '../economy/market.ts';
 
 export interface FactionView {
@@ -57,24 +57,6 @@ export function changeReputation(
   return next - current;
 }
 
-export function reputationLabel(value: number): string {
-  if (value >= 60) return 'ALLIED';
-  if (value >= 25) return 'FRIENDLY';
-  if (value >= 5) return 'WARM';
-  if (value > -5) return 'NEUTRAL';
-  if (value > -25) return 'COLD';
-  if (value > -60) return 'HOSTILE';
-  return 'WANTED';
-}
-
-export function reputationColor(value: number): string {
-  if (value >= 25) return '#7ef7b0';
-  if (value >= 5) return '#a8e6a3';
-  if (value > -5) return '#9aa4b2';
-  if (value > -25) return '#ffb347';
-  return '#ff6b6b';
-}
-
 /**
  * Small reputation drip for trading with a faction: the world notices that you
  * show up and pay your fees.
@@ -83,9 +65,3 @@ export function tradeReputationGain(units: number): number {
   return clamp(Math.round(units / 40), 1, 3);
 }
 
-export function factionSpecialities(_state: GameState, factionId: string | null) {
-  if (!factionId) return null;
-  const def = FACTIONS.find((f) => f.id === factionId);
-  if (!def) return null;
-  return { exports: def.exports as ResourceId[], imports: def.imports as ResourceId[] };
-}

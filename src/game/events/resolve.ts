@@ -1,6 +1,7 @@
 import type { Amounts, Encounter, EventPayload, GameState, ResourceId, Ship } from '../types.ts';
 import { runtimeRng } from '../rng.ts';
 import { createEncounter, resolveFight, tryEscape } from '../combat/combat.ts';
+import type { FightResult } from '../combat/combat.ts';
 import { shipStats } from '../ships/ship.ts';
 import { resourceSymbol } from '../data/resources.ts';
 import { addNews } from '../news/news.ts';
@@ -53,6 +54,8 @@ export function resolveTravelEvent(
   eventId: string,
   choiceId: string,
   payload: EventPayload,
+  /** Готовый результат боя из мини-игры: тогда бой не пересчитывается. */
+  prefilledFight?: FightResult | null,
 ): ResolutionOutcome {
   void eventDef(eventId);
   const system = state.systems[payload.systemId ?? ship.systemId] ?? state.systems[ship.systemId];
@@ -239,7 +242,9 @@ export function resolveTravelEvent(
         });
       }
       if (choiceId === 'fight') {
-        const result = resolveFight(state, ship, enemy);
+        // На Android и в браузере бой ведёт мини-игра: она отдаёт готовый
+        // результат. Если экран недоступен, бой считает старая статистика.
+        const result = prefilledFight ?? resolveFight(state, ship, enemy);
         ship.hull = result.playerHull;
         ship.shield = result.playerShield;
         if (result.outcome === 'victory') {

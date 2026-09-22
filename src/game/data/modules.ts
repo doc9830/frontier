@@ -280,16 +280,6 @@ export const MODULES: ModuleDef[] = [
   },
 ];
 
-export const MODULE_TYPES: ModuleType[] = [
-  'engine',
-  'jumpDrive',
-  'shield',
-  'reactor',
-  'cargo',
-  'scanner',
-  'weapon',
-];
-
 const MODULE_MAP: Record<string, ModuleDef> = Object.fromEntries(
   MODULES.map((m) => [m.type, m]),
 );

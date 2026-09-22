@@ -193,10 +193,3 @@ export function tunedLevel(
   return { ...base, name: `${base.name} · ${def.short}`, cost, materials, power, effect, note };
 }
 
-/** Полное имя установленного модуля: с клеймом верфи, если оно нестандартное. */
-export function equippedName(type: ModuleType, level: number, maker: MakerId): string {
-  if (level <= 0) return 'пусто';
-  const base = moduleLevel(type, level);
-  if (!base) return `${type} Mk ${level}`;
-  return maker === 'standard' ? base.name : `${base.name} · ${makerDef(maker).short}`;
-}

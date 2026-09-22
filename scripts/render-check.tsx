@@ -26,8 +26,11 @@ import { chooseSite, foundStation } from '../src/game/actions/site.ts';
 import { planetKindOf } from '../src/game/data/planets.ts';
 import { GalaxyMap } from '../src/ui/GalaxyMap.tsx';
 import { EventModal } from '../src/ui/EventModal.tsx';
+import { CombatScreen } from '../src/ui/CombatScreen.tsx';
 import { Toaster } from '../src/ui/Toaster.tsx';
-import { IntroScreen } from '../src/ui/IntroScreen.tsx';
+import { MainMenu } from '../src/ui/MainMenu.tsx';
+import { slotInfoOf } from '../src/game/save.ts';
+import type { SlotInfo } from '../src/game/save.ts';
 import { StationPanel } from '../src/ui/panels/StationPanel.tsx';
 import { SystemPanel } from '../src/ui/panels/SystemPanel.tsx';
 import { ResearchPanel } from '../src/ui/panels/ResearchPanel.tsx';
@@ -111,6 +114,7 @@ function renderShell(state: GameState, selectedId: string | null): void {
       onTogglePause={noop}
       onChange={noop}
       onReset={noop}
+      onMenu={noop}
       onSave={noop}
     />,
   );
@@ -118,20 +122,48 @@ function renderShell(state: GameState, selectedId: string | null): void {
 }
 
 
-// --------------------------------------------------------------- boot screen
-console.log('\n[1] boot screen');
+// --------------------------------------------------------------- main menu
+console.log('\n[1] main menu');
+const state = createGameState('RENDER-1', 'RENDERER');
+const emptySlot = (index: number, id: SlotInfo['id']): SlotInfo => ({
+  id,
+  index,
+  filled: false,
+  seed: '',
+  playerName: '',
+  shipName: '',
+  credits: 0,
+  day: 0,
+  savedAt: 0,
+  active: false,
+});
+const freshSlots: SlotInfo[] = [emptySlot(1, 'slot1'), emptySlot(2, 'slot2'), emptySlot(3, 'slot3')];
+const savedSlots: SlotInfo[] = [slotInfoOf(state, 'slot1', true), emptySlot(2, 'slot2'), emptySlot(3, 'slot3')];
 const freshSave = render(
-  'IntroScreen (no save)',
-  <IntroScreen hasSave={false} offlineReport={null} onNewGame={startGame} onContinue={resume} />,
+  'MainMenu (no save)',
+  <MainMenu slots={freshSlots} offlineReport={null} onPlay={resume} onCreate={startGame} onDelete={noop} />,
 );
-expect('intro shows the seed field', freshSave.includes('ключ галактики'));
+expect('menu shows the seed field', freshSave.includes('ключ галактики'));
+expect('menu lists every slot', (freshSave.match(/СЛОТ/g) ?? []).length === 3);
+expect('menu quotes the starting capital', freshSave.includes('стартовый капитал'));
+const savedMenu = render(
+  'MainMenu (save in slot 1)',
+  <MainMenu slots={savedSlots} offlineReport={null} onPlay={resume} onCreate={startGame} onDelete={noop} />,
+);
+expect('menu offers to resume the active world', savedMenu.includes('ПРОДОЛЖИТЬ'));
+expect('menu can delete a world', savedMenu.includes('УДАЛИТЬ'));
 const offline = render(
-  'IntroScreen (offline report)',
-  <IntroScreen hasSave offlineReport="Офлайн-прогон: смоделировано 2.0 ч." onNewGame={startGame} onContinue={resume} />,
+  'MainMenu (offline report)',
+  <MainMenu
+    slots={savedSlots}
+    offlineReport="Офлайн-прогон: смоделировано 2.0 ч."
+    onPlay={resume}
+    onCreate={startGame}
+    onDelete={noop}
+  />,
 );
 expect('offline report is surfaced', offline.includes('Офлайн-прогон'));
 
-const state = createGameState('RENDER-1', 'RENDERER');
 const ship = playerShip(state);
 const neighbour = state.systemIds.find((id) => id !== ship.systemId && state.systems[id].discovered) ?? null;
 
@@ -172,6 +204,7 @@ const settingsHtml = render(
     onTogglePause={noop}
     onChange={noop}
     onReset={noop}
+    onMenu={noop}
     onSave={noop}
   />,
 );
@@ -309,6 +342,17 @@ if (neighbour) {
   const modal = render('EventModal (pirate)', <EventModal state={state} onChoose={choose} />);
   expect('modal renders every choice', (modal.match(/class="btn choice"/g) ?? []).length >= 2);
   expect('modal is a dialog', modal.includes('modal-backdrop'));
+  expect('modal shows the honest forecast', modal.includes('Прогноз боя'));
+  const foe = state.pendingEvent?.payload.enemy;
+  if (foe) {
+    const combat = render('CombatScreen', <CombatScreen ship={ship} enemy={foe} onFinish={noop} />);
+    expect('battle screen names the contact', combat.includes('БОЕВОЙ КОНТАКТ'));
+    expect('battle screen keeps a radar canvas', combat.includes('combat-radar'));
+    expect('battle screen offers auto battle', combat.includes('АВТОБОЙ'));
+    expect('battle screen shows the goal', combat.includes('нужно попаданий'));
+  } else {
+    expect('pirate encounter carries an enemy in its payload', false, 'no enemy');
+  }
   state.pendingEvent = null;
 }
 

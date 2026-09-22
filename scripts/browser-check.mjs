@@ -207,14 +207,20 @@ const clickDock = (label) =>
 await send('Page.navigate', { url });
 await sleep(3000);
 
-console.log('\n[1] boot screen');
-const introText = await evaluate('document.body.innerText');
-check('intro screen renders', typeof introText === 'string' && introText.includes('FRONTIER'));
+console.log('\n[1] main menu');
+const menuText = await evaluate('document.body.innerText');
+check('menu renders', typeof menuText === 'string' && menuText.includes('FRONTIER'));
 check(
-  'intro quotes the starting capital',
-  introText.includes('стартовый капитал'),
-  introText.match(/стартовый капитал[^\n]*/)?.[0] ?? '',
+  'menu quotes the starting capital',
+  menuText.includes('стартовый капитал'),
+  menuText.match(/стартовый капитал[^\n]*/)?.[0] ?? '',
 );
+check(
+  'menu lists three save slots',
+  /СЛОТ 1/.test(menuText) && /СЛОТ 2/.test(menuText) && /СЛОТ 3/.test(menuText),
+  menuText.match(/СЛОТ \d[^\n]*/g)?.join(' | ') ?? '',
+);
+check('menu carries the how-to-play section', menuText.includes('КАК ИГРАТЬ'));
 
 console.log('\n[2] new galaxy');
 const started = await evaluate(`
@@ -229,10 +235,10 @@ check('new game button clicked', started === true);
 await sleep(1500);
 
 const shell = await evaluate('document.body.innerText');
-check('shell replaced the intro', !shell.includes('НОВАЯ ГАЛАКТИКА'));
+check('shell replaced the menu', !shell.includes('НОВАЯ ГАЛАКТИКА'));
 check('dock is on screen', shell.includes('СИСТЕМА') && shell.includes('ГРУЗ') && shell.includes('НАСТРОЙКИ'));
 check('credits are shown', /кр/.test(shell));
-check('save was written', await evaluate("localStorage.getItem('frontier.save.v1') !== null"));
+check('save was written', await evaluate("localStorage.getItem('frontier.save.slot1.v1') !== null"));
 
 const tabs = ['СИСТЕМА', 'ГРУЗ', 'КОРАБЛЬ', 'ФЛОТ', 'ЛЕНТА', 'НАСТРОЙКИ'];
 console.log('\n[3] every tab renders');
@@ -397,7 +403,8 @@ ws.close();
 await sleep(600);
 const freshTab = await newTab(url);
 await sleep(2000);
-await evaluate(`localStorage.setItem('frontier.save.v1', ${JSON.stringify(prepared)})`);
+await evaluate(`localStorage.setItem('frontier.save.slot1.v1', ${JSON.stringify(prepared)})`);
+await evaluate("localStorage.setItem('frontier.activeSlot.v1', 'slot1')");
 await send('Page.navigate', { url });
 await sleep(2500);
 const resume = await evaluate(`
@@ -456,6 +463,146 @@ const creditsAfter = await evaluate(`
 check('foundation charged the credits', creditsAfter < creditsBefore, `${creditsBefore} → ${creditsAfter}`);
 const toastText = (await evaluate("document.querySelector('.toaster')?.innerText ?? ''")).toLowerCase();
 check('player got feedback', toastText.includes('склад') || afterText.includes('склад'), toastText.slice(0, 60));
+
+// Возврат в главное меню и обратно: мир уезжает в свой слот, меню показывает его
+// карточкой, «продолжить» возвращает тот же мир — без перезагрузки страницы.
+console.log('\n[7b] main menu round trip');
+await clickTab('НАСТРОЙКИ');
+await sleep(300);
+const toMenu = await evaluate(`
+  (() => {
+    const button = [...document.querySelectorAll('.panelcol button')].find((b) =>
+      b.textContent.includes('ГЛАВНОЕ МЕНЮ'),
+    );
+    if (!button) return 'missing';
+    button.click();
+    return 'clicked';
+  })()
+`);
+check('settings offer the way back to the menu', toMenu === 'clicked', toMenu);
+await sleep(600);
+const roundTrip = await evaluate('document.body.innerText');
+const filledSlot = roundTrip.match(/СЛОТ 1[^\n]*/)?.[0] ?? '';
+check('menu came back with the world in slot 1', roundTrip.includes('СЛОТ 1 ·') && !filledSlot.includes('пусто'), filledSlot);
+const resumed = await evaluate(`
+  (() => {
+    const button = [...document.querySelectorAll('button')].find((b) => b.textContent.includes('ПРОДОЛЖИТЬ'));
+    if (!button || button.disabled) return false;
+    button.click();
+    return true;
+  })()
+`);
+check('menu offers to resume the saved world', resumed === true);
+await sleep(1000);
+const backInGame = await evaluate("document.querySelector('.dock')?.innerText ?? ''");
+check('resume returns to the shell', backInGame.includes('НАСТРОЙКИ'), backInGame.replace(/\s+/g, ' ').slice(0, 48));
+check(
+  'the round trip kept the active slot',
+  await evaluate("localStorage.getItem('frontier.activeSlot.v1') === 'slot1'"),
+  await evaluate("String(localStorage.getItem('frontier.activeSlot.v1'))"),
+);
+
+// Боевой экран: событие открывает радар, тап стреляет, автобой закрывает событие.
+console.log('\n[7c] боевой экран: радар, тапы, автобой');
+// Свежая вкладка и закрытая старая: иначе автосохранение предыдущего мира затрёт фикстуру.
+await fetch(`http://127.0.0.1:${PORT}/json/close/${lastTargetId}`);
+await sleep(600);
+await newTab(url);
+await sleep(2000);
+const battleSave = execFileSync(
+  process.execPath,
+  ['--experimental-strip-types', fileURLToPath(new URL('./prepare-battle-save.ts', import.meta.url))],
+  { encoding: 'utf8' },
+).trim();
+check('battle save is a real blob', battleSave.length > 1000, `${battleSave.length} chars`);
+await evaluate(`localStorage.setItem('frontier.save.slot1.v1', ${JSON.stringify(battleSave)})`);
+await evaluate("localStorage.setItem('frontier.activeSlot.v1', 'slot1')");
+await send('Page.navigate', { url });
+await sleep(2500);
+const resumeBattle = await evaluate(`
+  (() => {
+    const button = [...document.querySelectorAll('button')].find((b) => b.textContent.includes('ПРОДОЛЖИТЬ'));
+    if (!button || button.disabled) return false;
+    button.click();
+    return true;
+  })()
+`);
+check('the battle save resumes', resumeBattle === true);
+await sleep(1500);
+
+const eventText = await evaluate("document.querySelector('.modal')?.innerText ?? ''");
+check('pirate encounter waits for a decision', eventText.includes('В БОЙ'), eventText.slice(0, 70));
+check('the modal shows the honest forecast', eventText.includes('Прогноз боя'), eventText.match(/победа[^\n]*/)?.[0] ?? '');
+
+const fightOpen = await evaluate(`
+  (() => {
+    const button = [...document.querySelectorAll('.modal .btn.choice')].find((b) =>
+      b.textContent.includes('В БОЙ'),
+    );
+    if (!button) return 'missing';
+    button.click();
+    return 'clicked';
+  })()
+`);
+check('fight opens the radar', fightOpen === 'clicked', fightOpen);
+await sleep(700);
+
+const combatText = await evaluate("document.querySelector('.combat')?.innerText ?? ''");
+check('the battle screen is up', combatText.includes('БОЕВОЙ КОНТАКТ'), combatText.slice(0, 80));
+check('the radar canvas is drawn', await evaluate("!!document.querySelector('canvas.combat-radar')"));
+check(
+  'the battle screen shows the goal',
+  combatText.includes('нужно попаданий') || combatText.includes('АВТОБОЙ'),
+);
+
+// Тап по радару — это выстрел: счётчик выстрелов обязан вырасти. Жмём настоящей
+// мышью через CDP: синтетический PointerEvent не проходит через React.
+const radarTap = await evaluate(`
+  (() => {
+    const canvas = document.querySelector('canvas.combat-radar');
+    if (!canvas) return null;
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: rect.left + rect.width * 0.78,
+      y: rect.top + rect.height * 0.26,
+      before: document.querySelector('.combat-count')?.textContent ?? '',
+    };
+  })()
+`);
+check('the radar waits with a loaded gun', !!radarTap && radarTap.before.includes('выстрелов 0'), radarTap?.before.slice(0, 60) ?? 'no canvas');
+if (radarTap) {
+  const press = { x: radarTap.x, y: radarTap.y, button: 'left', clickCount: 1, pointerType: 'mouse' };
+  await send('Input.dispatchMouseEvent', { type: 'mousePressed', ...press, buttons: 1 });
+  await send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...press, buttons: 0 });
+  await sleep(350);
+}
+const shotText = await evaluate("document.querySelector('.combat-count')?.textContent ?? ''");
+check('a tap fires the gun', shotText.includes('выстрелов 1'), shotText.slice(0, 80));
+
+const autoBattle = await evaluate(`
+  (() => {
+    const button = [...document.querySelectorAll('.combat button')].find((b) =>
+      b.textContent.includes('АВТОБОЙ'),
+    );
+    if (!button) return 'missing';
+    if (button.disabled) return 'disabled';
+    button.click();
+    return 'clicked';
+  })()
+`);
+check('auto battle is offered', autoBattle === 'clicked', autoBattle);
+await sleep(1200);
+check('auto battle closed the battle screen', (await evaluate("!!document.querySelector('.combat')")) === false);
+const afterBattle = await evaluate("document.querySelector('.dock')?.innerText ?? ''");
+check('the world is back after the fight', afterBattle.includes('НАСТРОЙКИ'), afterBattle.replace(/\s+/g, ' ').slice(0, 60));
+const battleFeedback = await evaluate(
+  "document.querySelector('.toaster')?.innerText ?? document.querySelector('.newsbar')?.innerText ?? ''",
+);
+check('the fight left feedback', battleFeedback.length > 0, battleFeedback.replace(/\s+/g, ' ').slice(0, 90));
+const leftoverModal = await evaluate(
+  "(document.querySelector('.modal-backdrop')?.innerText ?? '').replace(/\\s+/g, ' ').slice(0, 90)",
+);
+check('no battle modal is left open', leftoverModal.length === 0, leftoverModal);
 
 console.log('\n[8] console health');
 check('no uncaught exceptions', consoleErrors.length === 0, consoleErrors.slice(0, 3).join(' | '));

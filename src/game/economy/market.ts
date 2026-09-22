@@ -102,16 +102,6 @@ export function applySell(market: SystemMarket, id: ResourceId, qty: number): vo
   market.stock[id] = Math.min(cap, (market.stock[id] ?? 0) + qty);
 }
 
-/** Price trend hint for the UI: rising / falling / stable. */
-export function priceTrend(market: SystemMarket, id: ResourceId): 'up' | 'down' | 'flat' {
-  const stock = market.stock[id] ?? 0;
-  const target = market.target[id] ?? 0;
-  const ratio = target > 0 ? stock / target : 1;
-  if (ratio > 1.25) return 'down';
-  if (ratio < 0.8) return 'up';
-  return 'flat';
-}
-
 /**
  * Slow drift of supply and demand. Called from the main simulation loop with
  * the elapsed time, so prices recover after the player hauls a lot of cargo.

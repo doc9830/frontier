@@ -41,6 +41,3 @@ export function addNews(
   return item;
 }
 
-export function systemNames(state: GameState, ids: string[]): string {
-  return ids.map((id) => state.systems[id]?.name ?? id).join(', ');
-}

@@ -24,15 +24,17 @@ import { NewsPanel } from './ui/panels/NewsPanel.tsx';
 import { SettingsPanel } from './ui/panels/SettingsPanel.tsx';
 import { GalaxyMap } from './ui/GalaxyMap.tsx';
 import { EventModal } from './ui/EventModal.tsx';
+import { CombatScreen } from './ui/CombatScreen.tsx';
 import { JumpBar } from './ui/JumpBar.tsx';
 import { JumpConfirm } from './ui/JumpConfirm.tsx';
 import { Toaster } from './ui/Toaster.tsx';
-import { IntroScreen } from './ui/IntroScreen.tsx';
+import { MainMenu } from './ui/MainMenu.tsx';
 import { STATUS_LABEL, cr, num } from './ui/format.ts';
-import { Tag } from './ui/kit.tsx';
+import { Btn, Tag } from './ui/kit.tsx';
 import { TABS, tabDef, screenTitle } from './ui/nav.ts';
 import type { Destination, Screen, TabId } from './ui/nav.ts';
 import { isAndroidShell, onShellBack } from './platform/android.ts';
+import type { Encounter } from './game/types.ts';
 
 /**
  * Оболочка игры: интро, HUD, карта, нижний док на шесть разделов и лист с
@@ -55,6 +57,8 @@ export function App() {
   const [hudOpen, setHudOpen] = useState(false);
   /** Прыжок, ждущий подтверждения (настройка «подтверждать прыжок»). */
   const [jumpTarget, setJumpTarget] = useState<string | null>(null);
+  /** Противник, с которым идёт бой на радаре: экран заменяет окно события. */
+  const [battleWith, setBattleWith] = useState<Encounter | null>(null);
   const hudRef = useRef<HTMLElement | null>(null);
   const dockRef = useRef<HTMLElement | null>(null);
 
@@ -101,6 +105,10 @@ export function App() {
    * закроет приложение (она ждёт второго нажатия за две секунды).
    */
   const goBack = (): boolean => {
+    if (battleWith) {
+      // Бой решает исход события: свернуть его нельзя, только доиграть.
+      return true;
+    }
     if (jumpTarget) {
       setJumpTarget(null);
       return true;
@@ -142,7 +150,7 @@ export function App() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [screens, sheetOpen, selectedId, jumpTarget, game.togglePause]);
+  }, [screens, sheetOpen, selectedId, jumpTarget, battleWith, game.togglePause]);
 
   // The bottom sheet must never crawl under the floating HUD: the header reports its own
   // height and the sheet caps itself with --hud-bottom (defaults to the collapsed HUD).
@@ -211,15 +219,16 @@ export function App() {
   useEffect(() => {
     if (!isAndroidShell()) return;
     return onShellBack(() => goBack());
-  }, [screens, sheetOpen, selectedId, jumpTarget]);
+  }, [screens, sheetOpen, selectedId, jumpTarget, battleWith]);
 
   if (!state) {
     return (
-      <IntroScreen
-        hasSave={game.hasExistingSave}
+      <MainMenu
+        slots={game.slots}
         offlineReport={game.offlineReport}
-        onNewGame={(seed, name) => game.newGame(seed, name)}
-        onContinue={() => game.continueGame()}
+        onPlay={game.continueGame}
+        onCreate={game.newGame}
+        onDelete={game.deleteSlot}
       />
     );
   }
@@ -250,6 +259,20 @@ export function App() {
       return;
     }
     performJump(id);
+  };
+
+  /**
+   * Выбор в окне события. «В бой» уходит на радар: бой ведёт игрок, а решение по
+   * событию закрывается уже после боя — с готовым результатом мини-игры.
+   */
+  const chooseEvent = (choiceId: string): void => {
+    const pending = state.pendingEvent;
+    const foe = pending?.payload.enemy;
+    if (choiceId === 'fight' && pending?.eventId === 'pirate_encounter' && foe) {
+      setBattleWith(foe);
+      return;
+    }
+    game.resolveEvent(choiceId);
   };
 
   /** Содержимое текущего раздела: либо корень вкладки, либо верхний подэкран. */
@@ -302,6 +325,7 @@ export function App() {
             onChange={game.updateSettings}
             onReset={game.resetSettings}
             onSave={game.save}
+            onMenu={game.backToMenu}
           />
         );
       default:
@@ -371,6 +395,16 @@ export function App() {
         </div>
 
         <JumpBar state={state} paused={paused} onCancel={() => game.act((draft) => cancelTravel(draft))} />
+
+        {/* Офлайн-прогон: доклад висит в HUD, пока игрок его не закроет. */}
+        {game.offlineReport ? (
+          <div className="warn hud-warn">
+            <span>{game.offlineReport}</span>
+            <Btn size="tiny" onClick={game.dismissOfflineReport}>
+              ОК
+            </Btn>
+          </div>
+        ) : null}
       </header>
 
       <div className="main">
@@ -452,7 +486,18 @@ export function App() {
       </nav>
 
       {settings.toasts ? <Toaster state={state} /> : null}
-      <EventModal state={state} onChoose={game.resolveEvent} />
+      {battleWith ? (
+        <CombatScreen
+          ship={ship}
+          enemy={battleWith}
+          onFinish={(result) => {
+            setBattleWith(null);
+            game.resolveEvent('fight', result);
+          }}
+        />
+      ) : (
+        <EventModal state={state} onChoose={chooseEvent} />
+      )}
       {jumpTarget ? (
         <JumpConfirm
           state={state}

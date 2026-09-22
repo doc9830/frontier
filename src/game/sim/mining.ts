@@ -125,10 +125,6 @@ export function planFromTotal(
   return out;
 }
 
-export function missionPlannedTotal(mission: MineMission): number {
-  return sumAmounts(mission.plan ?? {});
-}
-
 export function missionHauledTotal(mission: MineMission): number {
   return sumAmounts(mission.hauled ?? {});
 }

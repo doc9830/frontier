@@ -108,8 +108,5 @@ export function resourceSymbol(id: ResourceId): string {
   return RESOURCE_MAP[id]?.symbol ?? id;
 }
 
-/** Resources used as construction materials. */
-export const MATERIALS: ResourceId[] = ['metal', 'electronics'];
-
 /** Mineable raw resources and their yields from asteroid belts. */
 export const MINEABLE: ResourceId[] = ['ore', 'gas', 'rareOre'];

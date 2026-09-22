@@ -53,10 +53,3 @@ export function cancelTravel(state: GameState): void {
   if (!ship?.travel) return;
   abortTravel(state, ship, 'Прыжок прерван. Корабль остаётся в текущей системе.');
 }
-
-export function canJump(state: GameState, targetSystemId: string): boolean {
-  const plan = jumpPlan(state, targetSystemId);
-  if (!plan) return false;
-  const ship = playerShip(state);
-  return !!ship && ship.fuel >= plan.fuel;
-}

@@ -1,4 +1,4 @@
-import type { Amounts, ProductionRecipe } from '../types.ts';
+import type { ProductionRecipe } from '../types.ts';
 
 /**
  * Refinery recipes. Inputs are consumed from station storage when a job starts,
@@ -58,25 +58,4 @@ export function recipe(id: string): ProductionRecipe | undefined {
 
 export function recipesForLevel(refineryLevel: number): ProductionRecipe[] {
   return RECIPES.filter((r) => r.refineryLevel <= refineryLevel);
-}
-
-/** Rough value of a recipe run, used for sorting in the UI. */
-export function recipeValue(recipeEntry: ProductionRecipe, prices: Record<string, number>): number {
-  let value = 0;
-  for (const [id, qty] of Object.entries(recipeEntry.output) as [string, number][]) {
-    value += (prices[id] ?? 0) * qty;
-  }
-  for (const [id, qty] of Object.entries(recipeEntry.input) as [string, number][]) {
-    value -= (prices[id] ?? 0) * qty;
-  }
-  return Math.round(value);
-}
-
-export function scaleAmounts(amounts: Amounts, factor: number): Amounts {
-  const result: Amounts = {};
-  for (const [id, qty] of Object.entries(amounts) as [keyof Amounts, number][]) {
-    if (!qty) continue;
-    result[id] = Math.max(0, Math.round(qty * factor));
-  }
-  return result;
 }

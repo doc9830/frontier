@@ -1,8 +1,7 @@
-import type { Amounts, MakerId, ModuleLevelDef, ModuleType, ResourceId } from '../types.ts';
-import type { Ship, ShipTypeId } from '../types.ts';
+import type { MakerId, ModuleLevelDef, ModuleType, ResourceId } from '../types.ts';
+import type { Ship } from '../types.ts';
 import { shipType } from '../data/ships.ts';
-import { moduleLevel } from '../data/modules.ts';
-import { equippedName, tunedLevel } from '../data/makers.ts';
+import { tunedLevel } from '../data/makers.ts';
 import { RESOURCES } from '../data/resources.ts';
 
 /** Ship type plus every installed module, resolved into final numbers. */
@@ -173,15 +172,6 @@ export function releaseSealed(ship: Ship, id: ResourceId, qty: number): number {
   return released;
 }
 
-/** Снимает пломбу со всего груза: используется при сдаче и отмене контракта. */
-export function releaseAllSealed(ship: Ship): void {
-  if (!ship.sealed) return;
-  for (const def of RESOURCES) {
-    if (ship.sealed[def.id]) removeCargo(ship, def.id, ship.sealed[def.id] ?? 0);
-  }
-  ship.sealed = {};
-}
-
 export function addCargo(ship: Ship, id: ResourceId, qty: number): number {
   if (qty <= 0) return 0;
   const free = cargoFree(ship);
@@ -221,20 +211,3 @@ export function powerBudgetFor(
   };
 }
 
-export function moduleLabel(type: ModuleType, level: number, maker?: MakerId): string {
-  if (level <= 0) return 'пусто';
-  if (maker && maker !== 'standard') return equippedName(type, level, maker);
-  return moduleLevel(type, level)?.name ?? `${type} Mk ${level}`;
-}
-
-export function mergeAmounts(target: Amounts, source: Amounts, factor = 1): void {
-  for (const [key, value] of Object.entries(source)) {
-    if (!value) continue;
-    const id = key as ResourceId;
-    target[id] = (target[id] ?? 0) + value * factor;
-  }
-}
-
-export function shipTypeLabel(typeId: ShipTypeId): string {
-  return shipType(typeId).name.toUpperCase();
-}

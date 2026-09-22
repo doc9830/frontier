@@ -6,6 +6,7 @@ import { processSurvey } from '../exploration/scan.ts';
 import { processFleetShip } from './fleet.ts';
 import { currentHop, finishTravel, processTravelEvents, resumeTravel, revealAround } from './travel.ts';
 import { resolveTravelEvent } from '../events/resolve.ts';
+import type { FightResult } from '../combat/combat.ts';
 import { playerShip } from '../state/create.ts';
 import { addToast } from './toast.ts';
 import { addNews } from '../news/news.ts';
@@ -72,7 +73,12 @@ export function catchUp(state: GameState, seconds: number): number {
   return simulated;
 }
 
-export function resolvePendingEvent(state: GameState, choiceId: string): void {
+export function resolvePendingEvent(
+  state: GameState,
+  choiceId: string,
+  /** Результат боевой мини-игры: экран радара уже отыграл бой за игрока. */
+  prefilledFight?: FightResult | null,
+): void {
   const pending = state.pendingEvent;
   if (!pending) return;
   const ship = state.ships.find((s) => s.id === pending.shipId) ?? playerShip(state);
@@ -81,7 +87,7 @@ export function resolvePendingEvent(state: GameState, choiceId: string): void {
     return;
   }
 
-  const outcome = resolveTravelEvent(state, ship, pending.eventId, choiceId, pending.payload);
+  const outcome = resolveTravelEvent(state, ship, pending.eventId, choiceId, pending.payload, prefilledFight);
   if (outcome.kind !== 'info') addToast(state, outcome.summary, outcome.kind);
 
   if (outcome.triggerCombat) {
@@ -147,7 +153,3 @@ export function emergencyJump(state: GameState, ship: Ship): void {
   addToast(state, `Emergency jump complete: ${state.systems[targetId]?.name ?? targetId}.`, 'info');
 }
 
-/** Convenience for the UI: how many in-game days have passed. */
-export function elapsedDays(state: GameState): number {
-  return Math.floor(state.gameTime / 60);
-}

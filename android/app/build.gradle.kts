@@ -93,9 +93,12 @@ kotlin {
 
 /**
  * Packs `<repo>/dist` (or a freshly built one) into the APK assets.
- * `npm run build` owns producing dist; Gradle only copies it.
+ * `npm run build` owns producing dist; Gradle only mirrors it.
+ *
+ * Sync, not Copy: Copy leaves files that vanished from dist, so bundles of every
+ * previous release stayed inside the APK and grew it by ~200 KiB per version.
  */
-val copyWebApp by tasks.registering(Copy::class) {
+val copyWebApp by tasks.registering(Sync::class) {
     val distDir = rootProject.file("../dist")
     onlyIf { distDir.isDirectory }
     from(distDir)
