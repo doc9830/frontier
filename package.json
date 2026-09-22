@@ -1,7 +1,7 @@
 {
   "name": "frontier",
   "private": true,
-  "version": "0.2.4",
+  "version": "0.2.5",
   "type": "module",
   "description": "FRONTIER — procedurally generated space sandbox prototype (PWA)",
   "scripts": {

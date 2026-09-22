@@ -547,9 +547,52 @@ const fightOpen = await evaluate(`
 check('fight opens the radar', fightOpen === 'clicked', fightOpen);
 await sleep(700);
 
+// Радар проверяем на плотном экране, как на телефоне: при deviceScaleFactor 1
+// ошибка масштаба канваса не проявляется, и раньше этот случай проходил мимо.
+await send('Emulation.setDeviceMetricsOverride', {
+  width: 390,
+  height: 844,
+  deviceScaleFactor: 2,
+  mobile: true,
+});
+await sleep(500);
+
 const combatText = await evaluate("document.querySelector('.combat')?.innerText ?? ''");
 check('the battle screen is up', combatText.includes('БОЕВОЙ КОНТАКТ'), combatText.slice(0, 80));
 check('the radar canvas is drawn', await evaluate("!!document.querySelector('canvas.combat-radar')"));
+
+// Канвас обязан быть залит до самого дальнего угла буфера. Если кадр забыл
+// масштаб по DPR, радар ужимается в четверть канваса, а тапы при этом считаются
+// по всей площади — этот рассинхрон и ловим пикселем в углу.
+const radarPixels = await evaluate(`
+  (() => {
+    const canvas = document.querySelector('canvas.combat-radar');
+    if (!canvas) return null;
+    const ctx = canvas.getContext('2d');
+    const pixel = (x, y) => {
+      const data = ctx.getImageData(x, y, 1, 1).data;
+      return { alpha: data[3], light: data[0] + data[1] + data[2] };
+    };
+    return {
+      corner: pixel(canvas.width - 3, canvas.height - 3),
+      buffer: canvas.width,
+      css: Math.round(canvas.getBoundingClientRect().width),
+      dpr: window.devicePixelRatio,
+    };
+  })()
+`);
+check(
+  'the radar is painted right into the far corner of the canvas',
+  !!radarPixels && radarPixels.corner.alpha === 255,
+  radarPixels ? `угол: альфа ${radarPixels.corner.alpha}, яркость ${radarPixels.corner.light}` : 'no canvas',
+);
+check(
+  'the radar buffer matches the css box on a dense screen',
+  !!radarPixels && Math.abs(radarPixels.css * radarPixels.dpr - radarPixels.buffer) <= 2,
+  radarPixels
+    ? `${radarPixels.css}px × ${radarPixels.dpr} = ${radarPixels.css * radarPixels.dpr}, буфер ${radarPixels.buffer}`
+    : 'no canvas',
+);
 check(
   'the battle screen shows the goal',
   combatText.includes('нужно попаданий') || combatText.includes('АВТОБОЙ'),

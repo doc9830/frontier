@@ -14,8 +14,9 @@ import { changeReputation, factionView } from '../factions/reputation.ts';
 import { addNews } from '../news/news.ts';
 
 /**
- * Travel events. They are rare on purpose: most jumps complete quietly, and the
- * player should never feel nagged by the game.
+ * Travel events. Every hop gets its own roll at departure time, and the chance
+ * grows with route risk: calm lanes stay dull, lawless space keeps interrupting
+ * the flight. A single trip never turns into more than a few modals in a row.
  */
 
 export interface EventChoiceDef {
@@ -139,9 +140,16 @@ function pickEvent(state: GameState, riskScore: number, allowCombat: boolean): T
   return runtimeRng.weighted(weighted);
 }
 
+/** Потолок событий на рейс: даже длинный беззаконный маршрут — это не сериал. */
+const MAX_EVENTS_PER_TRIP = 3;
+
 /**
  * Rolls the events of a whole trip at departure time, so the schedule is part
  * of the save file and survives a page reload.
+ *
+ * The roll happens on every hop, the first and the last included: even a short
+ * shuttle between two systems can turn into a story. `nothing` still eats its
+ * roll, so a higher chance does not mean an event on every jump.
  */
 export function scheduleTravelEvents(
   state: GameState,
@@ -149,12 +157,12 @@ export function scheduleTravelEvents(
   departAt: number,
 ): TravelEvent[] {
   const events: TravelEvent[] = [];
-  if (plan.hops < 2) return events;
+  if (plan.hops < 1) return events;
   const perHopSeconds = plan.seconds / plan.hops;
   let combatUsed = false;
-  for (let hop = 1; hop < plan.hops; hop += 1) {
-    if (events.length >= 2) break;
-    const chance = 0.03 + plan.riskScore * 0.08;
+  for (let hop = 1; hop <= plan.hops; hop += 1) {
+    if (events.length >= MAX_EVENTS_PER_TRIP) break;
+    const chance = 0.1 + plan.riskScore * 0.2;
     if (!runtimeRng.chance(chance)) continue;
     const def = pickEvent(state, plan.riskScore, !combatUsed);
     if (def.id === 'nothing') continue;

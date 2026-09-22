@@ -1961,6 +1961,10 @@ input {
 
 .combat-radar {
   width: 100%;
+  /* Квадрат не должен съедать высоту экрана: на телефоне в альбомной ориентации
+     радар ужимается по высоте и остаётся по центру модалки. */
+  max-width: min(100%, 50vh);
+  align-self: center;
   aspect-ratio: 1 / 1;
   border: 1px solid var(--line);
   background: #04070d;

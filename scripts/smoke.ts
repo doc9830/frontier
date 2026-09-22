@@ -5,7 +5,7 @@
  *
  * Run with: npm run smoke
  */
-import type { GameState, ResourceId } from '../src/game/types.ts';
+import type { GameState, ResourceId, TravelPlan } from '../src/game/types.ts';
 import { createEncounter } from '../src/game/combat/combat.ts';
 import {
   BATTLE_SECONDS,
@@ -22,9 +22,9 @@ import { createGameState, playerShip, SAVE_VERSION } from '../src/game/state/cre
 import { SYSTEM_COUNT } from '../src/game/universe/generate.ts';
 import { exportSave, importSave } from '../src/game/save.ts';
 import { advance, catchUp, resolvePendingEvent } from '../src/game/sim/engine.ts';
-import { eventDef, EVENT_DEFS, buildPayload } from '../src/game/events/events.ts';
+import { eventDef, EVENT_DEFS, buildPayload, scheduleTravelEvents } from '../src/game/events/events.ts';
 import { jumpPlan, travelTo } from '../src/game/actions/nav.ts';
-import { findPath } from '../src/game/exploration/travel.ts';
+import { findPath, riskLabel } from '../src/game/exploration/travel.ts';
 import { marketPrice } from '../src/game/economy/market.ts';
 import {
   atMarket,
@@ -893,6 +893,46 @@ check(
 check(
   'choice ids are unique inside a def',
   defs.every((def) => new Set(def.choices.map((c) => c.id)).size === def.choices.length),
+);
+
+// Частота событий: бросок идёт на каждом прыжке — и на первом, и на последнем, —
+// а шанс растёт с риском маршрута. Проверки статистические, поэтому допуски
+// широкие, а замер печатается рядом: видно реальные цифры, а не только «ок».
+const eventTrips = (riskScore: number, hops: number, tries: number) => {
+  const trial = createGameState(`SMOKE-RATE-${riskScore}-${hops}`, 'RATE');
+  const plan: TravelPlan = {
+    path: Array.from({ length: hops + 1 }, (_, index) => `hop-${index}`),
+    hops,
+    fuel: hops,
+    seconds: hops * 40,
+    risk: riskLabel(riskScore),
+    riskScore,
+    distance: hops * 40,
+  };
+  let events = 0;
+  let trips = 0;
+  let most = 0;
+  for (let attempt = 0; attempt < tries; attempt += 1) {
+    const rolled = scheduleTravelEvents(trial, plan, 0).length;
+    events += rolled;
+    if (rolled > 0) trips += 1;
+    most = Math.max(most, rolled);
+  }
+  return { events, trips, most };
+};
+const lonelyHop = eventTrips(0.9, 1, 300);
+const riskyLane = eventTrips(0.9, 4, 600);
+const calmLane = eventTrips(0.15, 4, 600);
+check(
+  'a single hop can still roll an event',
+  lonelyHop.events > 0,
+  `${lonelyHop.events} событий на 300 одиночных рейсов`,
+);
+check('a trip never stacks more than three events', riskyLane.most <= 3, `максимум ${riskyLane.most} за рейс`);
+check(
+  'risky lanes interrupt the flight far more often than calm ones',
+  riskyLane.trips > calmLane.trips * 1.4,
+  `беззаконная ${riskyLane.trips}/600 рейсов, спокойная ${calmLane.trips}/600`,
 );
 
 const raid = createGameState('SMOKE-EVENT', 'TESTER');

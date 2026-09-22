@@ -32,14 +32,21 @@ interface Flash {
   at: number;
 }
 
-/** Квадратный канвас под размер элемента: рисуем в CSS-пикселях, не в блобе DPR. */
-function fitCanvas(canvas: HTMLCanvasElement): void {
+/**
+ * Квадратный канвас под размер элемента: буфер в `dpr` раз больше, а рисуем мы
+ * по-прежнему в CSS-пикселях (кадр ставит `ctx.setTransform`). Обе величины
+ * запоминаем в `dataset`: иначе на телефоне с DPR 2–3 картинка ужималась бы в
+ * угол канваса, а тапы считались бы по всей площади.
+ */
+function fitCanvas(canvas: HTMLCanvasElement): number {
   const rect = canvas.getBoundingClientRect();
-  const size = Math.max(220, Math.round(rect.width || 320));
+  const size = Math.max(120, Math.round(rect.width || rect.height || 320));
   const dpr = Math.min(2, window.devicePixelRatio || 1);
   canvas.width = Math.round(size * dpr);
   canvas.height = Math.round(size * dpr);
   canvas.dataset.dpr = String(dpr);
+  canvas.dataset.size = String(size);
+  return size;
 }
 
 function drawRadar(
@@ -176,9 +183,14 @@ export function CombatScreen({
     const canvas = canvasRef.current;
     if (!canvas) return;
     fitCanvas(canvas);
-    const onResize = (): void => fitCanvas(canvas);
+    const onResize = (): void => {
+      fitCanvas(canvas);
+    };
     window.addEventListener('resize', onResize);
     window.addEventListener('orientationchange', onResize);
+    // Раскладка модалки плывёт от длины подписей: следим за самим канвасом.
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(onResize);
+    observer?.observe(canvas);
 
     let raf = 0;
     let last = performance.now();
@@ -194,7 +206,9 @@ export function CombatScreen({
       const ctx = canvas.getContext('2d');
       if (ctx) {
         const dpr = Number(canvas.dataset.dpr ?? '1');
-        drawRadar(ctx, canvas.width / dpr, current, flashRef.current);
+        const size = Number(canvas.dataset.size ?? canvas.width / dpr);
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        drawRadar(ctx, size, current, flashRef.current);
       }
 
       // Пока бой идёт, цифры обновляются десять раз в секунду: чаще не нужно.
@@ -213,6 +227,7 @@ export function CombatScreen({
       cancelAnimationFrame(raf);
       window.removeEventListener('resize', onResize);
       window.removeEventListener('orientationchange', onResize);
+      observer?.disconnect();
     };
   }, []);
 
